@@ -93,6 +93,10 @@ export async function syncAdminPromptCategory(token: string, category: string) {
     return apiPost<AdminPromptCategory[]>("/api/admin/prompt-categories/sync", { category }, token);
 }
 
+export async function syncAdminPromptCategoriesAll(token: string) {
+    return apiPost<AdminPromptCategory[]>("/api/admin/prompt-categories/sync-all", {}, token);
+}
+
 export type AdminPromptQuery = {
     keyword?: string;
     category?: string;

@@ -21,6 +21,11 @@ func AdminPromptCategories(w http.ResponseWriter, r *http.Request) {
 	OK(w, service.ListPromptCategories())
 }
 
+func AdminSyncAllPromptCategories(w http.ResponseWriter, r *http.Request) {
+	service.SyncRemotePromptCategories()
+	OK(w, service.ListPromptCategories())
+}
+
 func AdminPrompts(w http.ResponseWriter, r *http.Request) {
 	result, err := service.ListPrompts(parseQuery(r))
 	if err != nil {

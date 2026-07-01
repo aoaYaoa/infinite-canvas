@@ -605,14 +605,14 @@ export default function ImagePage() {
             const resolvedUrl = await resolveImageUrl(payload.storageKey, payload.dataUrl);
             const safeUrl = resolvedUrl || "";
             const reference =
-                payload.storageKey || payload.source === "asset"
+                payload.storageKey || payload.source === "asset" || payload.source === "library"
                     ? {
                           id: nanoid(),
                           name: payload.title,
                           type: payload.mimeType || "image/png",
                           dataUrl: safeUrl,
                           storageKey: payload.storageKey,
-                          source: "asset" as const,
+                          source: payload.source === "library" ? "library" : "asset",
                           assetId: payload.assetId,
                           temporary: false,
                       }

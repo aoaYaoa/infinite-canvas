@@ -107,6 +107,7 @@ export type CanvasAssistantImage = {
     dataUrl: string;
     storageKey?: string;
     prompt: string;
+    source?: "asset" | "library";
 };
 
 export type CanvasAssistantMessage = {

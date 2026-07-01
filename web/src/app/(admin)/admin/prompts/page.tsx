@@ -30,6 +30,7 @@ export default function AdminPromptsPage() {
         resetFilters,
         refreshPrompts,
         syncCategory,
+        syncAllCategories,
         savePrompt: saveAdminPrompt,
         deletePrompt,
         deletePrompts,
@@ -194,6 +195,9 @@ export default function AdminPromptsPage() {
                         </Button>,
                         <Button key="sync" icon={<SyncOutlined />} onClick={() => setIsSyncOpen(true)}>
                             同步
+                        </Button>,
+                        <Button key="sync-all" icon={<SyncOutlined />} loading={isSyncing} onClick={() => void syncAllCategories()}>
+                            全部同步
                         </Button>,
                         <Button key="add" type="primary" icon={<PlusOutlined />} onClick={() => setEditingPrompt({ category: defaultCategory, tags: [] })}>
                             新增

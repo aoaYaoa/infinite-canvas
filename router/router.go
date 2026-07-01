@@ -127,6 +127,7 @@ func New() *gin.Engine {
 	admin.POST("/storage/measure", gin.WrapF(handler.AdminMeasureStorageProvider))
 	admin.GET("/prompt-categories", gin.WrapF(handler.AdminPromptCategories))
 	admin.POST("/prompt-categories/sync", gin.WrapF(handler.AdminSyncPromptCategories))
+	admin.POST("/prompt-categories/sync-all", gin.WrapF(handler.AdminSyncAllPromptCategories))
 	admin.GET("/prompts", gin.WrapF(handler.AdminPrompts))
 	admin.POST("/prompts", gin.WrapF(handler.AdminSavePrompt))
 	admin.POST("/prompts/batch-delete", gin.WrapF(handler.AdminDeletePrompts))

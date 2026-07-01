@@ -144,7 +144,8 @@ func buildGptImage2Prompts() ([]model.Prompt, error) {
 			continue
 		}
 		image := gptImage2RawBase + "/" + item.ImageDir + "/output.jpg"
-		items = append(items, model.Prompt{ID: "gpt-image-2-prompts-" + leftPad(len(items)+1), Title: item.Title, CoverURL: image, Prompt: prompt, Tags: tagsFromCategory(item.Category), CreatedAt: item.AddedAt, UpdatedAt: item.AddedAt, Preview: markdownPreview([]string{image})})
+		date := normalizePromptTime(item.AddedAt)
+		items = append(items, model.Prompt{ID: "gpt-image-2-prompts-" + leftPad(len(items)+1), Title: item.Title, CoverURL: image, Prompt: prompt, Tags: tagsFromCategory(item.Category), CreatedAt: date, UpdatedAt: date, Preview: markdownPreview([]string{image})})
 	}
 	return items, nil
 }
@@ -375,7 +376,8 @@ func buildXianyuLatestXPrompts(offset int) ([]model.Prompt, error) {
 		image := firstXianyuNonEmpty(item.PrimaryImageURL, firstString(item.ImageURLs))
 		title := firstXianyuNonEmpty(item.Reason, item.Author, "X Prompt")
 		preview := xianyuLatestXPreview(item, image)
-		items = append(items, model.Prompt{ID: "xianyu-awesome-gptimage2-" + leftPad(offset+len(items)+1), Title: title, CoverURL: image, Prompt: prompt, Tags: []string{"x"}, CreatedAt: item.CreatedAt, UpdatedAt: item.CreatedAt, Preview: preview})
+		date := normalizePromptTime(item.CreatedAt)
+		items = append(items, model.Prompt{ID: "xianyu-awesome-gptimage2-" + leftPad(offset+len(items)+1), Title: title, CoverURL: image, Prompt: prompt, Tags: []string{"x"}, CreatedAt: date, UpdatedAt: date, Preview: preview})
 	}
 	for _, group := range data.Dates {
 		for _, item := range group.Items {
@@ -403,6 +405,19 @@ func xianyuLatestXPreview(item xianyuLatestPrompt, image string) string {
 		lines = append(lines, image)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func normalizePromptTime(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, time.RFC1123, time.RFC1123Z, "2006-01-02"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.Format(time.RFC3339)
+		}
+	}
+	return value
 }
 
 func firstXianyuNonEmpty(values ...string) string {

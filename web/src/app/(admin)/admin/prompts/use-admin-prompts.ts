@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App } from "antd";
 
-import { deleteAdminPrompt, deleteAdminPrompts, fetchAdminPrompts, fetchAdminPromptCategories, saveAdminPrompt, syncAdminPromptCategory, type AdminPromptCategory } from "@/services/api/admin";
+import { deleteAdminPrompt, deleteAdminPrompts, fetchAdminPrompts, fetchAdminPromptCategories, saveAdminPrompt, syncAdminPromptCategoriesAll, syncAdminPromptCategory, type AdminPromptCategory } from "@/services/api/admin";
 import type { Prompt } from "@/services/api/prompts";
 import { useUserStore } from "@/stores/use-user-store";
 
@@ -41,6 +41,18 @@ export function useAdminPrompts() {
             queryClient.setQueryData<AdminPromptCategory[]>(["admin", "prompt-categories", token], categories);
             await queryClient.invalidateQueries({ queryKey: ["admin", "prompts"] });
             message.success("远程提示词源已同步");
+        },
+        onError: (error) => {
+            message.error(error instanceof Error ? error.message : "同步失败");
+        },
+    });
+
+    const syncAllMutation = useMutation({
+        mutationFn: () => syncAdminPromptCategoriesAll(token),
+        onSuccess: async (categories) => {
+            queryClient.setQueryData<AdminPromptCategory[]>(["admin", "prompt-categories", token], categories);
+            await queryClient.invalidateQueries({ queryKey: ["admin", "prompts"] });
+            message.success("全部远程提示词源已同步");
         },
         onError: (error) => {
             message.error(error instanceof Error ? error.message : "同步失败");
@@ -114,8 +126,9 @@ export function useAdminPrompts() {
         pageSize,
         total: data?.total || 0,
         isLoading: categoriesQuery.isFetching || promptsQuery.isFetching || saveMutation.isPending || deleteMutation.isPending || batchDeleteMutation.isPending,
-        isSyncing: syncMutation.isPending,
+        isSyncing: syncMutation.isPending || syncAllMutation.isPending,
         syncCategory: (category: string) => syncMutation.mutateAsync(category),
+        syncAllCategories: () => syncAllMutation.mutateAsync(),
         searchPrompts: (value = keyword) => updateFilters({ keyword: value }),
         changeCategory: (value: string) => updateFilters({ category: value, tag: [] }),
         changeTag: (value: string[]) => updateFilters({ tag: value }),
