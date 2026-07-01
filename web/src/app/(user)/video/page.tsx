@@ -1,4 +1,5 @@
 "use client";
+import axios from "axios";
 
 import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, CheckSquare, ChevronDown, ChevronUp, ClipboardPaste, CloudUpload, Copy, Download, FolderPlus, History, LoaderCircle, Music2, PanelBottom, PanelLeft, Plus, RotateCcw, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -961,8 +962,13 @@ export default function VideoPage() {
             await saveGenerationLog(baseLog);
             setResults((value) => updateResultByLogId(value, log.id, { task, progress: task.progress, durationMs, lastPolledAt: baseLog.lastPolledAt }));
         } catch (error) {
-            const nextLog = { ...log, status: "失败" as const, durationMs: Date.now() - startedAt, lastPolledAt: Date.now(), error: errorMessage(error), errorDetail: errorDetail(error) };
-            await finalizeGenerationLog(nextLog);
+            const nextLog = { ...log, durationMs: Date.now() - startedAt, lastPolledAt: Date.now(), error: errorMessage(error), errorDetail: errorDetail(error) };
+            if (isTransientVideoPollError(error)) {
+                await saveGenerationLog({ ...nextLog, status: "生成中" });
+                setResults((value) => updateResultByLogId(value, log.id, { error: nextLog.error, errorDetail: nextLog.errorDetail, durationMs: nextLog.durationMs, lastPolledAt: nextLog.lastPolledAt }));
+                return;
+            }
+            await finalizeGenerationLog({ ...nextLog, status: "失败" });
             setResults((value) => updateResultByLogId(value, log.id, { status: "failed", error: nextLog.error, errorDetail: nextLog.errorDetail, durationMs: nextLog.durationMs, lastPolledAt: nextLog.lastPolledAt }));
         } finally {
             pollingLogIdsRef.current.delete(log.id);
@@ -2470,6 +2476,12 @@ function isCompletedVideoTask(task: VideoResponse) {
 
 function isFailedVideoTask(task: VideoResponse) {
     return ["failed", "fail", "error", "cancelled", "canceled"].includes((task.status || "").toLowerCase());
+}
+
+function isTransientVideoPollError(error: unknown) {
+    if (!axios.isAxiosError(error)) return false;
+    const status = error.response?.status;
+    return !error.response || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
 function isRecoverableBackendVideoTask(task: VideoResponse) {
