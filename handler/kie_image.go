@@ -800,6 +800,9 @@ func setKIEResolutionInput(input map[string]any, modelName string, value any) {
 	}
 
 	normalized := normalizeKIEResolutionValue(toStringSafe(value), config.resolutionKind)
+	if config.maxResolution == "2K" && normalized == "4K" {
+		normalized = "2K"
+	}
 	if field == "image_resolution" {
 		delete(input, "resolution")
 		input["image_resolution"] = normalized

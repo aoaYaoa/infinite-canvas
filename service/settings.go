@@ -532,6 +532,7 @@ func kieMarketModels() []string {
 		"seedream/5-lite-image-to-image",
 		"z-image",
 		"nano-banana-2",
+		"nano-banana-2-lite",
 		"google/imagen4-fast",
 		"google/imagen4-ultra",
 		"google/imagen4",

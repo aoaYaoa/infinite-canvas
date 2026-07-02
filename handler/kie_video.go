@@ -754,8 +754,6 @@ func validateKIERequiredInputs(input map[string]any, modelName string) error {
 			return err
 		}
 		return requireKIEAnyInput(input, "video_urls")
-	case "grok-imagine-video-1-5-preview":
-		return requireKIEAnyInput(input, "image_urls")
 	case "happyhorse/reference-to-video":
 		return requireKIEAnyInput(input, "image_urls")
 	}
@@ -784,6 +782,7 @@ type kieInputConfig struct {
 	hasResolution   bool
 	resolutionField string
 	resolutionKind  string
+	maxResolution   string
 	countField      string
 	countKind       string
 	hasQuality      bool
@@ -865,32 +864,33 @@ func kieModelInputConfig(modelName string) kieInputConfig {
 		"bytedance/seedream":                  {aspectField: "image_size", aspectKind: "image_size_named"},
 		"bytedance/seedream-v4-edit":          {aspectField: "image_size", aspectKind: "image_size_named", resolutionField: "image_resolution", resolutionKind: "image", countField: "max_images", imageRefField: "image_urls", imageRefKind: "array"},
 		"bytedance/seedream-v4-text-to-image": {aspectField: "image_size", aspectKind: "image_size_named", resolutionField: "image_resolution", resolutionKind: "image", countField: "max_images"},
-		"flux-2/flex-image-to-image":          {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image", imageRefField: "input_urls", imageRefKind: "array"},
-		"flux-2/flex-text-to-image":           {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image"},
-		"flux-2/pro-image-to-image":           {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image", imageRefField: "input_urls", imageRefKind: "array"},
-		"flux-2/pro-text-to-image":            {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image"},
-		"gpt-image-2-image-to-image":          {aspectField: "aspect_ratio", imageRefField: "input_urls", imageRefKind: "array"},
-		"gpt-image-2-text-to-image":           {aspectField: "aspect_ratio"},
+		"flux-2/flex-image-to-image":          {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image", maxResolution: "2K", imageRefField: "input_urls", imageRefKind: "array"},
+		"flux-2/flex-text-to-image":           {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image", maxResolution: "2K"},
+		"flux-2/pro-image-to-image":           {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image", maxResolution: "2K", imageRefField: "input_urls", imageRefKind: "array"},
+		"flux-2/pro-text-to-image":            {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image", maxResolution: "2K"},
+		"gpt-image-2-image-to-image":          {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image", imageRefField: "input_urls", imageRefKind: "array"},
+		"gpt-image-2-text-to-image":           {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image"},
 		"nano-banana-2":                       {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image", hasOutputFormat: true, imageRefField: "image_input", imageRefKind: "array"},
+		"nano-banana-2-lite":                  {aspectField: "aspect_ratio", imageRefField: "image_urls", imageRefKind: "array"},
 		"nano-banana-pro":                     {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image", hasOutputFormat: true, imageRefField: "image_input", imageRefKind: "array"},
 		"wan/2-7-image":                       {hasResolution: true, resolutionKind: "image", countField: "n", imageRefField: "input_urls", imageRefKind: "array"},
 		"wan/2-7-image-pro":                   {hasResolution: true, resolutionKind: "image", countField: "n", imageRefField: "input_urls", imageRefKind: "array"},
 
 		"google/imagen4":                 {aspectField: "aspect_ratio"},
-		"google/imagen4-fast":            {aspectField: "aspect_ratio", countField: "num_images", countKind: "string"},
+		"google/imagen4-fast":            {aspectField: "aspect_ratio"},
 		"google/imagen4-ultra":           {aspectField: "aspect_ratio"},
 		"google/nano-banana":             {aspectField: "aspect_ratio", hasOutputFormat: true},
 		"google/nano-banana-edit":        {aspectField: "aspect_ratio", hasOutputFormat: true, imageRefField: "image_urls", imageRefKind: "array"},
 		"gpt-image/1.5-image-to-image":   {aspectField: "aspect_ratio", hasQuality: true, imageRefField: "input_urls", imageRefKind: "array"},
 		"gpt-image/1.5-text-to-image":    {aspectField: "aspect_ratio", hasQuality: true},
 		"grok-imagine/text-to-image":     {aspectField: "aspect_ratio"},
-		"grok-imagine/image-to-image":    {aspectField: "aspect_ratio", imageRefField: "image_urls", imageRefKind: "array"},
+		"grok-imagine/image-to-image":    {imageRefField: "image_urls", imageRefKind: "array"},
 		"grok-imagine/upscale":           {imageRefField: "image_url", imageRefKind: "single"},
 		"grok-imagine/extend":            {imageRefField: "image_url", imageRefKind: "single"},
 		"ideogram/character":             {aspectField: "image_size", aspectKind: "image_size_named", countField: "num_images", countKind: "string", imageRefField: "reference_image_urls", imageRefKind: "array"},
 		"ideogram/character-edit":        {countField: "num_images", countKind: "string", imageRefField: "image_url", imageRefKind: "single"},
 		"ideogram/character-remix":       {aspectField: "image_size", aspectKind: "image_size_named", countField: "num_images", countKind: "string", imageRefField: "reference_image_urls", imageRefKind: "array"},
-		"ideogram/v3-edit":               {aspectField: "image_size", aspectKind: "image_size_named", countField: "num_images", countKind: "string", imageRefField: "image_url", imageRefKind: "single"},
+		"ideogram/v3-edit":               {imageRefField: "image_url", imageRefKind: "single"},
 		"ideogram/v3-remix":              {aspectField: "image_size", aspectKind: "image_size_named", countField: "num_images", countKind: "string", imageRefField: "image_url", imageRefKind: "single"},
 		"ideogram/v3-text-to-image":      {aspectField: "image_size", aspectKind: "image_size_named"},
 		"qwen/text-to-image":             {aspectField: "image_size", aspectKind: "image_size_named", hasOutputFormat: true},
@@ -1012,6 +1012,7 @@ func kieModelAliases() map[string]string {
 		"seedream/4-5-edit":                     "seedream/4.5-edit",
 		"z-image/z-image":                       "z-image",
 		"google/nanobanana2":                    "nano-banana-2",
+		"google/nano-banana-2-lite":             "nano-banana-2-lite",
 		"google/pro-image-to-image":             "nano-banana-pro",
 		"flux2/pro-image-to-image":              "flux-2/pro-image-to-image",
 		"flux2/pro-text-to-image":               "flux-2/pro-text-to-image",

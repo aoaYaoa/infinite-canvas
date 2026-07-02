@@ -27,8 +27,11 @@ type apimartInputConfig struct {
 	durationField       string
 	hasResolution       bool
 	resolutionCase      string
+	maxResolution       string
+	minResolution       string
 	hasCount            bool
 	hasQuality          bool
+	maxImageRefs        int
 	hasOutput           bool
 	modeFromRes         bool
 	dropAspectWithImage bool
@@ -205,9 +208,15 @@ func apimartVideoConfig(modelName string) apimartInputConfig {
 		config.aspectField = "aspect_ratio"
 		config.imageRefField = "image_with_roles"
 		config.imageRefKind = "roles"
-	case strings.Contains(model, "sora"):
+	case strings.Contains(model, "sora-2-pro"):
 		config.aspectField = "aspect_ratio"
 		config.dropAspectWithImage = true
+		config.maxImageRefs = 1
+	case strings.Contains(model, "sora-2"):
+		config.aspectField = "aspect_ratio"
+		config.maxResolution = "720p"
+		config.dropAspectWithImage = true
+		config.maxImageRefs = 1
 	case strings.Contains(model, "veo") && strings.Contains(model, "official"):
 		config.aspectField = "aspect_ratio"
 		config.imageRefField = "first_frame_image"
@@ -272,6 +281,7 @@ func apimartVideoConfig(modelName string) apimartInputConfig {
 		config.audioRefKind = "single"
 	case strings.Contains(model, "wan2-5"), strings.Contains(model, "wan2.5"):
 		config.aspectField = "size"
+		config.dropAspectWithImage = true
 		config.audioRefField = "audio_url"
 		config.audioRefKind = "single"
 	case strings.Contains(model, "wan2-6"), strings.Contains(model, "wan2.6"):
@@ -317,6 +327,7 @@ func apimartVideoConfig(modelName string) apimartInputConfig {
 		config.imageRefKind = "pixverse"
 	case strings.Contains(model, "omni-flash"):
 		config.aspectField = "aspect_ratio"
+		config.maxResolution = "720p"
 		config.videoRefField = "video_urls"
 		config.videoRefKind = "array"
 	}
@@ -383,13 +394,16 @@ func normalizeAPIMartResolution(payload map[string]any, config apimartInputConfi
 		return
 	}
 	value := firstNonEmpty(toStringSafe(payload["resolution"]), toStringSafe(payload["resolution_name"]), toStringSafe(payload["image_resolution"]))
+	if config.resolutionCase != "video" && config.resolutionCase != "upper_video" {
+		value = firstNonEmpty(value, apimartSizeResolution(toStringSafe(payload["size"])), apimartQualityResolution(toStringSafe(payload["quality"])))
+	}
 	if strings.TrimSpace(value) != "" {
 		if config.resolutionCase == "video" {
-			payload["resolution"] = normalizeAPIMartVideoResolution(value)
+			payload["resolution"] = normalizeAPIMartVideoResolution(value, config)
 		} else if config.resolutionCase == "upper_video" {
-			payload["resolution"] = strings.ToUpper(normalizeAPIMartVideoResolution(value))
+			payload["resolution"] = strings.ToUpper(normalizeAPIMartVideoResolution(value, config))
 		} else {
-			payload["resolution"] = normalizeAPIMartImageResolution(value, config.resolutionCase)
+			payload["resolution"] = normalizeAPIMartImageResolution(clampAPIMartImageResolution(value, config), config.resolutionCase)
 		}
 	}
 	delete(payload, "image_resolution")
@@ -403,7 +417,7 @@ func normalizeAPIMartVideoMode(payload map[string]any, config apimartInputConfig
 	mode := strings.ToLower(strings.TrimSpace(toStringSafe(payload["mode"])))
 	if mode == "" || mode == "normal" {
 		resolution := strings.ToLower(firstNonEmpty(toStringSafe(payload["resolution"]), toStringSafe(payload["resolution_name"])))
-		switch normalizeAPIMartVideoResolution(resolution) {
+		switch normalizeAPIMartVideoResolution(resolution, apimartInputConfig{}) {
 		case "1080p", "4k":
 			mode = "pro"
 		default:
@@ -500,7 +514,7 @@ func normalizeAPIMartVideoQuality(payload map[string]any, config apimartInputCon
 	}
 	value := firstNonEmpty(toStringSafe(payload["quality"]), toStringSafe(payload["resolution"]), toStringSafe(payload["resolution_name"]))
 	if strings.TrimSpace(value) != "" {
-		payload["quality"] = normalizeAPIMartVideoResolution(value)
+		payload["quality"] = normalizeAPIMartVideoResolution(value, config)
 	}
 	delete(payload, "resolution")
 	delete(payload, "resolution_name")
@@ -624,6 +638,8 @@ func validateAPIMartVideoRequiredInputs(payload map[string]any, modelName string
 		return requireAPIMartAnyInput(payload, "prompt", "first_frame_image", "image_urls")
 	case strings.Contains(model, "motion-control"):
 		return requireAPIMartAnyInput(payload, "image_url", "video_url")
+	case strings.Contains(model, "minimax-hailuo-2-3-fast"):
+		return requireAPIMartAnyInput(payload, "first_frame_image")
 	case strings.Contains(model, "wan2-7-videoedit"), strings.Contains(model, "wan2.7-videoedit"):
 		return requireAPIMartAnyInput(payload, "video_urls")
 	case strings.Contains(model, "wan2-7-r2v"), strings.Contains(model, "wan2.7-r2v"):
@@ -783,6 +799,9 @@ func setAPIMartImageReference(payload map[string]any, config apimartInputConfig,
 	}
 	if field == "" || len(values) == 0 {
 		return
+	}
+	if config.maxImageRefs > 0 && len(values) > config.maxImageRefs {
+		values = values[:config.maxImageRefs]
 	}
 	if (config.imageRefKind == "seedance2" || config.imageRefKind == "roles") && isAPIMartFirstLastSource(sourceKey) {
 		appendAPIMartImageRole(payload, sourceKey, values[0])
@@ -1566,43 +1585,167 @@ func normalizeAPIMartModelName(modelName string) string {
 
 func normalizeAPIMartRatio(value string) string {
 	value = strings.TrimSpace(strings.ToLower(value))
-	switch value {
-	case "", "auto":
+	if value == "" || value == "auto" {
 		return "auto"
-	case "landscape", "1280x720", "1920x1080", "1024x576", "720x405":
-		return "16:9"
-	case "portrait", "720x1280", "1080x1920", "576x1024", "405x720":
-		return "9:16"
-	case "square", "1024x1024", "1080x1080", "960x960":
-		return "1:1"
+	}
+	if width, height, ok := parseAPIMartSize(value); ok {
+		if ratio := normalizeAPIMartSizeRatio(width, height); ratio != "" {
+			return ratio
+		}
+	}
+	return value
+}
+
+func parseAPIMartSize(value string) (int, int, bool) {
+	value = strings.TrimSpace(strings.ToLower(value))
+	separator := "x"
+	if strings.Contains(value, "*") {
+		separator = "*"
+	}
+	parts := strings.Split(value, separator)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	width, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil || width <= 0 {
+		return 0, 0, false
+	}
+	height, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil || height <= 0 {
+		return 0, 0, false
+	}
+	return width, height, true
+}
+
+func normalizeAPIMartSizeRatio(width int, height int) string {
+	for _, item := range []struct {
+		width  int
+		height int
+		ratio  string
+	}{
+		{1, 1, "1:1"},
+		{16, 9, "16:9"},
+		{9, 16, "9:16"},
+		{4, 3, "4:3"},
+		{3, 4, "3:4"},
+		{3, 2, "3:2"},
+		{2, 3, "2:3"},
+		{21, 9, "21:9"},
+		{9, 21, "9:21"},
+	} {
+		diff := width*item.height - height*item.width
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff*100 <= width*item.height {
+			return item.ratio
+		}
+	}
+	return ""
+}
+
+func apimartSizeResolution(value string) string {
+	width, height, ok := parseAPIMartSize(value)
+	if !ok {
+		return ""
+	}
+	longSide := width
+	if height > longSide {
+		longSide = height
+	}
+	switch {
+	case longSide >= 3500:
+		return "4K"
+	case longSide >= 1700:
+		return "2K"
+	case longSide >= 900:
+		return "1K"
+	default:
+		return ""
+	}
+}
+
+func apimartQualityResolution(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "low", "standard":
+		return "1K"
+	case "medium", "hd":
+		return "2K"
+	case "high", "uhd":
+		return "4K"
+	default:
+		return ""
+	}
+}
+
+func clampAPIMartImageResolution(value string, config apimartInputConfig) string {
+	level := apimartResolutionLevel(value)
+	if level == 0 {
+		return value
+	}
+	if maxLevel := apimartResolutionLevel(config.maxResolution); maxLevel > 0 && level > maxLevel {
+		level = maxLevel
+	}
+	if minLevel := apimartResolutionLevel(config.minResolution); minLevel > 0 && level < minLevel {
+		level = minLevel
+	}
+	switch level {
+	case 1:
+		return "1K"
+	case 2:
+		return "2K"
+	case 3:
+		return "3K"
+	case 4:
+		return "4K"
 	default:
 		return value
 	}
 }
 
-func normalizeAPIMartVideoResolution(value string) string {
+func apimartResolutionLevel(value string) int {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "0.5", "0.5k", "512", "512p":
+		return 1
+	case "1", "1k", "1024", "1024p", "low", "standard":
+		return 1
+	case "2", "2k", "2048", "2048p", "medium", "hd":
+		return 2
+	case "3", "3k", "3072":
+		return 3
+	case "4", "4k", "4096", "4096p", "high", "uhd":
+		return 4
+	default:
+		return 0
+	}
+}
+
+func normalizeAPIMartVideoResolution(value string, config apimartInputConfig) string {
 	value = strings.TrimSpace(strings.ToLower(value))
 	value = strings.TrimSuffix(value, " ")
+	normalized := value
 	switch value {
 	case "480", "480p", "sd", "low":
-		return "480p"
+		normalized = "480p"
 	case "512", "512p":
-		return "512p"
+		normalized = "512p"
 	case "540", "540p":
-		return "540p"
+		normalized = "540p"
 	case "720", "720p", "hd", "medium", "standard":
-		return "720p"
+		normalized = "720p"
 	case "768", "768p":
-		return "768p"
+		normalized = "768p"
 	case "1080", "1080p", "fhd", "high", "pro":
-		return "1080p"
+		normalized = "1080p"
 	case "2160", "2160p", "4k", "uhd":
-		return "4k"
+		normalized = "4k"
 	case "360", "360p":
-		return "360p"
-	default:
-		return value
+		normalized = "360p"
 	}
+	if config.maxResolution == "720p" && (normalized == "1080p" || normalized == "4k") {
+		return "720p"
+	}
+	return normalized
 }
 
 func normalizeAPIMartImageResolution(value string, mode string) string {

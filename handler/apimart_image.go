@@ -43,11 +43,15 @@ func normalizeAPIMartImageParams(payload map[string]any, modelName string, chann
 		config.aspectField = "size"
 	}
 
-	normalizeAPIMartAspect(payload, config)
 	normalizeAPIMartResolution(payload, config)
+	normalizeAPIMartAspect(payload, config)
 	normalizeAPIMartImageCount(payload, config)
 	normalizeAPIMartImageQuality(payload, config)
-	normalizeAPIMartReferenceInputs(payload, modelName, config, channel)
+	if apimartImageReferenceExcluded(modelName) {
+		clearAPIMartImageReferenceFields(payload)
+	} else {
+		normalizeAPIMartReferenceInputs(payload, modelName, config, channel)
+	}
 	if err := validateAPIMartImageRequiredInputs(payload, modelName); err != nil {
 		payload["_apimart_reference_error"] = err.Error()
 	}
@@ -73,29 +77,45 @@ func apimartImageConfig(modelName string) apimartInputConfig {
 		config.resolutionCase = "lower"
 		config.hasQuality = false
 		config.hasOutput = false
+	case strings.Contains(model, "gpt-4o-image"):
+		config.hasResolution = false
 	case strings.Contains(model, "gpt-image-1"):
 		config.hasResolution = false
 		config.hasQuality = true
 		config.hasOutput = true
+	case strings.Contains(model, "gemini-3-1-flash-lite"):
+		config.resolutionCase = "upper"
+		config.maxResolution = "1K"
 	case strings.Contains(model, "gemini-3-1"), strings.Contains(model, "gemini-31"), strings.Contains(model, "nano-banana2"):
 		config.resolutionCase = "upper"
+		config.hasCount = false
 	case strings.Contains(model, "gemini-3-pro"), strings.Contains(model, "nano-banana-pro"):
 		config.resolutionCase = "upper"
+		config.hasCount = false
 	case strings.Contains(model, "gemini-2-5"), strings.Contains(model, "nano-banana"):
 		config.resolutionCase = "upper"
+		config.maxResolution = "1K"
+		config.hasCount = false
 	case strings.Contains(model, "imagen"):
 		config.hasResolution = false
 		config.hasQuality = false
+		config.hasCount = false
 		config.imageRefField = ""
 	case strings.Contains(model, "seedream-5"):
 		config.resolutionCase = "upper"
+		config.minResolution = "2K"
 		config.hasOutput = true
+	case strings.Contains(model, "seedream-4-5"), strings.Contains(model, "seedance-4-5"):
+		config.resolutionCase = "upper"
+		config.minResolution = "2K"
 	case strings.Contains(model, "seedream"), strings.Contains(model, "seedance-4"):
 		config.resolutionCase = "upper"
 	case strings.Contains(model, "qwen"):
 		config.resolutionCase = "upper"
+		config.maxResolution = "2K"
 	case strings.Contains(model, "z-image"):
 		config.resolutionCase = "upper"
+		config.maxResolution = "2K"
 		config.hasCount = false
 		config.imageRefField = ""
 	case strings.Contains(model, "grok-imagine"):
@@ -127,6 +147,39 @@ func normalizeAPIMartImageQuality(payload map[string]any, config apimartInputCon
 		delete(payload, "output_format")
 	}
 	delete(payload, "format")
+}
+
+func apimartImageReferenceExcluded(modelName string) bool {
+	switch normalizeAPIMartModelName(modelName) {
+	case "grok-imagine-1-5-apimart", "imagen-4-0-apimart":
+		return true
+	default:
+		return false
+	}
+}
+
+func clearAPIMartImageReferenceFields(payload map[string]any) {
+	for _, key := range []string{
+		"image",
+		"images",
+		"image_url",
+		"image_urls",
+		"input_url",
+		"input_urls",
+		"input_reference",
+		"input_reference[]",
+		"image_input",
+		"reference_image",
+		"reference_images",
+		"reference_image_url",
+		"reference_image_urls",
+		"first_frame_url",
+		"first_frame_image",
+		"last_frame_url",
+		"last_frame_image",
+	} {
+		delete(payload, key)
+	}
 }
 
 func validateAPIMartImageRequiredInputs(payload map[string]any, modelName string) error {
