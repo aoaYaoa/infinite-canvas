@@ -17,6 +17,8 @@
 
 全量支持 APIMart 所有图片，视频模型，直接添加 APIMart Key 以及 URL 即可直接使用
 
+APIMart 点此链接 [https://apimart.ai/register?aff=fWMrEv](https://apimart.ai/register?aff=fWMrEv) 注册后充值有积分奖励（支持主流 LLM，音频模型，视频模型）
+
 本项目基于 [basketikun(纯前端)](https://github.com/basketikun/infinite-canvas) 为底，合并 [HuFakai](https://github.com/HuFakai/infinite-canvas) 生图增强版基础上，针对视频和视频生成逻辑配置更加完善，完善后端云同步机制，不再依赖纯前端
 
 > [!CAUTION]
