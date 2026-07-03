@@ -75,7 +75,7 @@ func apimartImageConfig(modelName string) apimartInputConfig {
 		config.hasOutput = true
 	case strings.Contains(model, "gpt-image-2"):
 		config.resolutionCase = "lower"
-		config.hasQuality = false
+		config.hasQuality = true
 		config.hasOutput = false
 	case strings.Contains(model, "gpt-4o-image"):
 		config.hasResolution = false
@@ -203,7 +203,7 @@ func normalizeAPIMartOutputFormat(value string) string {
 }
 
 func copyAPIMartImageResponse(w http.ResponseWriter, response *http.Response, request *http.Request, channel model.ModelChannel, logContext aiLogContext, onFailure func()) bool {
-	if !strings.Contains(request.URL.Path, "/images/generations") {
+	if !strings.Contains(request.URL.Path, "/images/generations") && !strings.Contains(request.URL.Path, "/images/edits") {
 		return false
 	}
 

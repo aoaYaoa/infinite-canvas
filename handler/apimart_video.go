@@ -253,6 +253,10 @@ func apimartVideoConfig(modelName string) apimartInputConfig {
 		config.imageRefKind = "happyhorse"
 		config.videoRefField = "video_url"
 		config.videoRefKind = "single"
+	case strings.Contains(model, "gemini-omni-flash-preview"):
+		config.maxResolution = "720p"
+		config.videoRefField = "video_urls"
+		config.videoRefKind = "array"
 	case strings.Contains(model, "wan2-7-r2v"), strings.Contains(model, "wan2.7-r2v"):
 		config.aspectField = "size"
 		config.resolutionCase = "upper_video"
@@ -316,7 +320,7 @@ func apimartVideoConfig(modelName string) apimartInputConfig {
 		config.modeFromRes = true
 	case strings.Contains(model, "vidu"):
 		config.aspectField = "aspect_ratio"
-		config.dropAspectWithImage = true
+		config.dropAspectWithImage = model != "viduq3" && model != "viduq3-mix"
 		config.imageRefKind = "array_frames"
 	case strings.Contains(model, "grok-imagine"):
 		config.aspectField = "size"
@@ -327,7 +331,6 @@ func apimartVideoConfig(modelName string) apimartInputConfig {
 		config.imageRefKind = "pixverse"
 	case strings.Contains(model, "omni-flash"):
 		config.aspectField = "aspect_ratio"
-		config.maxResolution = "720p"
 		config.videoRefField = "video_urls"
 		config.videoRefKind = "array"
 	}
@@ -548,6 +551,9 @@ func normalizeAPIMartImageCount(payload map[string]any, config apimartInputConfi
 
 func applyAPIMartVideoDefaults(payload map[string]any, modelName string) {
 	model := normalizeAPIMartModelName(modelName)
+	if strings.Contains(model, "wan2-5") && isEmptyValue(payload["audio"]) {
+		payload["audio"] = true
+	}
 	if isAPIMartKlingV26MotionControlModel(modelName) {
 		delete(payload, "keep_original_sound")
 		delete(payload, "watermark_info")
@@ -585,7 +591,7 @@ func applyAPIMartVideoGenerateAudioInput(payload map[string]any, modelName strin
 		payload["generate_audio"] = enabled
 	case strings.Contains(model, "doubao-seedance-1-5"), strings.Contains(model, "seedance-1-5"):
 		payload["audio"] = enabled
-	case strings.Contains(model, "wan2-5"), strings.Contains(model, "wan2.5"), strings.Contains(model, "wan2-6"), strings.Contains(model, "wan2.6"):
+	case model == "wan2-6", model == "wan2-6-i2v-flash":
 		payload["audio"] = enabled
 	case strings.Contains(model, "kling-v3-omni"):
 		if isEmptyValue(payload["video_list"]) {
@@ -624,6 +630,9 @@ func clearAPIMartConflictingReferences(payload map[string]any, modelName string)
 	if (strings.Contains(model, "wan2-7") || strings.Contains(model, "wan2.7")) && !strings.Contains(model, "r2v") && !strings.Contains(model, "videoedit") && !isEmptyValue(payload["video_urls"]) {
 		delete(payload, "audio_url")
 	}
+	if strings.Contains(model, "omni-flash-ext") && !isEmptyValue(payload["video_urls"]) {
+		delete(payload, "duration")
+	}
 }
 
 func validateAPIMartVideoRequiredInputs(payload map[string]any, modelName string) error {
@@ -633,11 +642,14 @@ func validateAPIMartVideoRequiredInputs(payload map[string]any, modelName string
 		return requireAPIMartAnyInput(payload, "prompt", "first_frame_image")
 	case model == "happyhorse-1-1":
 		if len(normalizeAPIMartReferenceStringList(payload["image_urls"])) > 9 {
-			return errors.New("APIMart image_urls supports at most 9 images")
+			return errors.New("图片数量最多9张")
 		}
 		return requireAPIMartAnyInput(payload, "prompt", "first_frame_image", "image_urls")
 	case strings.Contains(model, "motion-control"):
-		return requireAPIMartAnyInput(payload, "image_url", "video_url")
+		if isEmptyValue(payload["image_url"]) || isEmptyValue(payload["video_url"]) {
+			return errors.New("motion-control 模型缺少参考图和参考视频")
+		}
+		return nil
 	case strings.Contains(model, "minimax-hailuo-2-3-fast"):
 		return requireAPIMartAnyInput(payload, "first_frame_image")
 	case strings.Contains(model, "wan2-7-videoedit"), strings.Contains(model, "wan2.7-videoedit"):
@@ -1572,7 +1584,8 @@ func detectAPIMartReferenceContentType(filename string) string {
 }
 
 func isAPIMartKlingV26MotionControlModel(modelName string) bool {
-	return normalizeAPIMartModelName(modelName) == "kling-v2-6-motion-control"
+	model := normalizeAPIMartModelName(modelName)
+	return model == "kling-v2-6-motion-control" || model == "kling-v3-motion-control"
 }
 
 func normalizeAPIMartModelName(modelName string) string {

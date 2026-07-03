@@ -152,7 +152,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 			Fail(w, "AI 接口请求失败")
 			return
 		}
-	} else if isAPIMartChannel(channel, modelName) && upstreamPath == "/images/generations" {
+	} else if isAPIMartChannel(channel, modelName) && (upstreamPath == "/images/generations" || upstreamPath == "/images/edits") {
 		body, contentType, err = normalizeAPIMartImageBody(body, contentType, modelName, channel)
 		if err != nil {
 			log.Printf("AI proxy normalize APIMart image request failed: model=%s err=%v", modelName, err)
@@ -516,6 +516,10 @@ func resolveAIProxyPath(channel model.ModelChannel, modelName string, path strin
 			return "/videos/generations"
 		}
 		if path == "/images/edits" {
+			model := normalizeAPIMartModelName(modelName)
+			if strings.Contains(model, "grok-imagine") && strings.Contains(model, "edit") {
+				return path
+			}
 			return "/images/generations"
 		}
 		if strings.HasPrefix(path, "/videos/") && !strings.HasSuffix(path, "/content") {

@@ -217,7 +217,7 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
     } else if (apimartMotionControl) {
         body.append("mode", normalizeAPIMartKlingMotionControlMode(config.vquality));
     } else {
-        if (!kieMotionControl) body.append("seconds", normalizeVideoSeconds(config.videoSeconds));
+        if (!kieMotionControl && !isGeminiOmniFlashVideoModel(model)) body.append("seconds", normalizeVideoSecondsForModel(model, config.videoSeconds));
         if (isSeedanceVideoConfig(config)) body.append("size", normalizeSeedanceRatio(config.size));
         else if (size) body.append("size", size);
         body.append("resolution_name", normalizeVideoResolution(config.vquality));
@@ -245,7 +245,7 @@ function isAPIMartKlingV3VideoConfig(config: AiConfig, model: string) {
 }
 
 function isAPIMartKlingMotionControlVideoConfig(config: AiConfig, model: string) {
-    return isAPIMartKlingVideoConfig(config, model, "kling-v2-6-motion-control");
+    return isAPIMartKlingVideoConfig(config, model, "kling-v2-6-motion-control") || isAPIMartKlingVideoConfig(config, model, "kling-v3-motion-control");
 }
 
 function isKIEKlingV3VideoConfig(config: AiConfig, model: string) {
@@ -440,6 +440,27 @@ function videoPollId(model: string, task: VideoResponse) {
 function normalizeVideoSeconds(value: string) {
     const seconds = Math.floor(Number(value) || 6);
     return String(Math.max(1, Math.min(20, seconds)));
+}
+
+function isGeminiOmniFlashVideoModel(model: string) {
+    return modelKey(model) === "gemini-omni-flash-preview";
+}
+
+function normalizeVideoSecondsForModel(model: string, value: string) {
+    const seconds = Number(normalizeVideoSeconds(value));
+    const key = modelKey(model);
+    if (key.includes("sora-2")) return closestAllowedSeconds(seconds, [4, 8, 12, 16, 20]);
+    if (key.includes("veo3-1") || key.includes("veo-3-1")) return "8";
+    if (key.includes("minimax-hailuo-02")) return closestAllowedSeconds(seconds, [5, 10]);
+    if (key.includes("minimax-hailuo-2-3")) return closestAllowedSeconds(seconds, [6, 10]);
+    if (key.includes("omni-flash-ext")) return closestAllowedSeconds(seconds, [4, 6, 8, 10]);
+    if (key.includes("wan2-5") || key.includes("wan2.5")) return closestAllowedSeconds(seconds, [5, 10]);
+    if (key === "wan2-6") return closestAllowedSeconds(seconds, [5, 10, 15]);
+    return String(seconds);
+}
+
+function closestAllowedSeconds(seconds: number, allowed: number[]) {
+    return String(allowed.reduce((best, item) => Math.abs(item - seconds) < Math.abs(best - seconds) ? item : best, allowed[0]));
 }
 
 function normalizeVideoSize(value: string) {

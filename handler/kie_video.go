@@ -755,7 +755,7 @@ func validateKIERequiredInputs(input map[string]any, modelName string) error {
 		}
 		return requireKIEAnyInput(input, "video_urls")
 	case "happyhorse/reference-to-video":
-		return requireKIEAnyInput(input, "image_urls")
+		return requireKIEAnyInput(input, "reference_image")
 	}
 	if strings.Contains(model, "image-to-video") || strings.Contains(model, "image_to_video") {
 		return requireKIEAnyInput(input, "image_url", "image_urls", "input_urls", "first_frame_url", "image_input")
@@ -809,12 +809,12 @@ func kieModelInputConfig(modelName string) kieInputConfig {
 		"bytedance/v1-pro-image-to-video":      {durationKind: "string", hasResolution: true, imageRefField: "image_url", imageRefKind: "single"},
 		"bytedance/v1-pro-text-to-video":       {aspectField: "aspect_ratio", durationKind: "string", hasResolution: true},
 
-		"gemini-omni-video":                 {durationKind: "string", imageRefField: "image_urls", imageRefKind: "array", videoRefField: "video_list", videoRefKind: "gemini_video_list", audioRefField: "audio_ids", audioRefKind: "array"},
+		"gemini-omni-video":                 {aspectField: "aspect_ratio", durationKind: "string", hasResolution: true, imageRefField: "image_urls", imageRefKind: "array", videoRefField: "video_list", videoRefKind: "gemini_video_list", audioRefField: "audio_ids", audioRefKind: "array"},
 		"grok-imagine/image-to-video":       {aspectField: "aspect_ratio", durationKind: "string", hasResolution: true, presetField: "mode", imageRefField: "image_urls", imageRefKind: "array"},
 		"grok-imagine/text-to-video":        {aspectField: "aspect_ratio", durationKind: "string", hasResolution: true, presetField: "mode"},
 		"grok-imagine-video-1-5-preview":    {aspectField: "aspect_ratio", durationKind: "number", hasResolution: true, imageRefField: "image_urls", imageRefKind: "array"},
 		"happyhorse/image-to-video":         {durationKind: "number", hasResolution: true, imageRefField: "image_urls", imageRefKind: "array"},
-		"happyhorse/reference-to-video":     {aspectField: "aspect_ratio", durationKind: "number", hasResolution: true, imageRefField: "image_urls", imageRefKind: "array"},
+		"happyhorse/reference-to-video":     {aspectField: "aspect_ratio", durationKind: "number", hasResolution: true, imageRefField: "reference_image", imageRefKind: "array"},
 		"happyhorse/text-to-video":          {aspectField: "aspect_ratio", durationKind: "number", hasResolution: true},
 		"happyhorse/video-edit":             {hasResolution: true, imageRefField: "reference_image", imageRefKind: "array", videoRefField: "video_url", videoRefKind: "single"},
 		"happyhorse-1-1/text-to-video":      {aspectField: "aspect_ratio", durationKind: "number", hasResolution: true},
@@ -873,8 +873,8 @@ func kieModelInputConfig(modelName string) kieInputConfig {
 		"nano-banana-2":                       {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image", hasOutputFormat: true, imageRefField: "image_input", imageRefKind: "array"},
 		"nano-banana-2-lite":                  {aspectField: "aspect_ratio", imageRefField: "image_urls", imageRefKind: "array"},
 		"nano-banana-pro":                     {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image", hasOutputFormat: true, imageRefField: "image_input", imageRefKind: "array"},
-		"wan/2-7-image":                       {hasResolution: true, resolutionKind: "image", countField: "n", imageRefField: "input_urls", imageRefKind: "array"},
-		"wan/2-7-image-pro":                   {hasResolution: true, resolutionKind: "image", countField: "n", imageRefField: "input_urls", imageRefKind: "array"},
+		"wan/2-7-image":                       {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image", countField: "n", imageRefField: "input_urls", imageRefKind: "array"},
+		"wan/2-7-image-pro":                   {aspectField: "aspect_ratio", hasResolution: true, resolutionKind: "image", countField: "n", imageRefField: "input_urls", imageRefKind: "array"},
 
 		"google/imagen4":                 {aspectField: "aspect_ratio"},
 		"google/imagen4-fast":            {aspectField: "aspect_ratio"},
@@ -885,7 +885,6 @@ func kieModelInputConfig(modelName string) kieInputConfig {
 		"gpt-image/1.5-text-to-image":    {aspectField: "aspect_ratio", hasQuality: true},
 		"grok-imagine/text-to-image":     {aspectField: "aspect_ratio"},
 		"grok-imagine/image-to-image":    {imageRefField: "image_urls", imageRefKind: "array"},
-		"grok-imagine/upscale":           {imageRefField: "image_url", imageRefKind: "single"},
 		"grok-imagine/extend":            {imageRefField: "image_url", imageRefKind: "single"},
 		"ideogram/character":             {aspectField: "image_size", aspectKind: "image_size_named", countField: "num_images", countKind: "string", imageRefField: "reference_image_urls", imageRefKind: "array"},
 		"ideogram/character-edit":        {countField: "num_images", countKind: "string", imageRefField: "image_url", imageRefKind: "single"},
@@ -894,7 +893,7 @@ func kieModelInputConfig(modelName string) kieInputConfig {
 		"ideogram/v3-remix":              {aspectField: "image_size", aspectKind: "image_size_named", countField: "num_images", countKind: "string", imageRefField: "image_url", imageRefKind: "single"},
 		"ideogram/v3-text-to-image":      {aspectField: "image_size", aspectKind: "image_size_named"},
 		"qwen/text-to-image":             {aspectField: "image_size", aspectKind: "image_size_named", hasOutputFormat: true},
-		"qwen/image-edit":                {aspectField: "image_size", aspectKind: "image_size_named", hasOutputFormat: true, imageRefField: "image_url", imageRefKind: "single"},
+		"qwen/image-edit":                {aspectField: "image_size", aspectKind: "image_size_named", countField: "num_images", countKind: "string", hasOutputFormat: true, imageRefField: "image_url", imageRefKind: "single"},
 		"qwen/image-to-image":            {hasOutputFormat: true, imageRefField: "image_url", imageRefKind: "single"},
 		"qwen2/image-edit":               {aspectField: "image_size", hasOutputFormat: true, imageRefField: "image_url", imageRefKind: "single"},
 		"qwen2/text-to-image":            {aspectField: "image_size", hasOutputFormat: true},

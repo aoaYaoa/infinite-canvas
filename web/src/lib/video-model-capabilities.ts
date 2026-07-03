@@ -44,8 +44,8 @@ export function supportsVideoAudioGeneration(modelName: string) {
         model.includes("doubao-seedance-2-0") ||
         model.includes("doubao-seedance-1-5") ||
         (model.includes("veo") && model.includes("official")) ||
-        model.includes("wan2-5") ||
-        model.includes("wan2-6") ||
+        model === "wan2-6" ||
+        model === "wan2-6-i2v-flash" ||
         model.includes("kling-v2-6") ||
         model.includes("kling-2-6") ||
         ((model.includes("kling-v3") || model.includes("kling-3-0")) && !model.includes("turbo")) ||

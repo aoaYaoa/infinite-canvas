@@ -226,6 +226,8 @@ function isVideoModelName(model: string) {
         value.includes("wan2.5") ||
         value.includes("wan2-6") ||
         value.includes("wan2.6") ||
+        value.includes("wan2-7") ||
+        value.includes("wan2.7") ||
         value.includes("wan2-7-r2v") ||
         value.includes("wan2.7-r2v") ||
         value.includes("wan2-7-videoedit") ||
