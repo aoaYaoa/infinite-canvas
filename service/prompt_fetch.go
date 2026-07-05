@@ -120,8 +120,13 @@ func fetchText(baseURL, file string) (string, error) {
 	return string(data), err
 }
 
+type gptImage2Case struct {
+	prompt string
+	image  string
+}
+
 func buildGptImage2Prompts() ([]model.Prompt, error) {
-	cases := map[string]string{}
+	cases := map[string]gptImage2Case{}
 	raw, err := fetchText(gptImage2RawBase, "data/ingested_tweets.json")
 	if err != nil {
 		return nil, err
@@ -139,21 +144,39 @@ func buildGptImage2Prompts() ([]model.Prompt, error) {
 	}
 	items := []model.Prompt{}
 	for _, item := range data.Records {
-		prompt := cases[item.TweetURL]
-		if prompt == "" {
+		c := cases[item.TweetURL]
+		if c.prompt == "" {
+			c = cases[item.ImageDir]
+		}
+		if c.prompt == "" {
 			continue
 		}
-		image := gptImage2RawBase + "/" + item.ImageDir + "/output.jpg"
+		image := c.image
 		date := normalizePromptTime(item.AddedAt)
-		items = append(items, model.Prompt{ID: "gpt-image-2-prompts-" + leftPad(len(items)+1), Title: item.Title, CoverURL: image, Prompt: prompt, Tags: tagsFromCategory(item.Category), CreatedAt: date, UpdatedAt: date, Preview: markdownPreview([]string{image})})
+		items = append(items, model.Prompt{ID: "gpt-image-2-prompts-" + leftPad(len(items)+1), Title: item.Title, CoverURL: image, Prompt: c.prompt, Tags: tagsFromCategory(item.Category), CreatedAt: date, UpdatedAt: date, Preview: markdownPreview([]string{image})})
 	}
 	return items, nil
 }
 
-func collectGptImage2Cases(cases map[string]string, markdown string) {
+func collectGptImage2Cases(cases map[string]gptImage2Case, markdown string) {
 	re := regexp.MustCompile("(?s)### Case \\d+: \\[[^\\]]+\\]\\(([^)]+)\\).*?\\*\\*Prompt:\\*\\*\\s*\\r?\\n\\s*```[\\w-]*\\r?\\n(.*?)\\r?\\n```")
+	reImageDir := regexp.MustCompile(`images/\w+_case\d+`)
+	reImage := regexp.MustCompile(`<img[^>]+src="([^"]+)"|!\[[^\]]*\]\(([^)]+)\)`)
 	for _, match := range re.FindAllStringSubmatch(markdown, -1) {
-		cases[match[1]] = strings.TrimSpace(match[2])
+		prompt := strings.TrimSpace(match[2])
+		image := ""
+		if imgMatch := reImage.FindStringSubmatch(match[0]); imgMatch != nil {
+			if imgMatch[1] != "" {
+				image = absoluteImage(gptImage2RawBase, imgMatch[1])
+			} else {
+				image = absoluteImage(gptImage2RawBase, imgMatch[2])
+			}
+		}
+		item := gptImage2Case{prompt: prompt, image: image}
+		cases[match[1]] = item
+		if dir := reImageDir.FindString(match[0]); dir != "" {
+			cases[dir] = item
+		}
 	}
 }
 

@@ -154,10 +154,10 @@ func mergeKIEPayloadIntoInput(payload map[string]any, input map[string]any, mode
 		delete(input, "seconds")
 	} else {
 		if value, ok := payload["duration"]; ok && !isEmptyValue(value) {
-			input["duration"] = normalizeKIEDurationValue(value, config.durationKind)
+			input["duration"] = normalizeKIEDurationInput(value, config)
 		}
 		if value, ok := payload["seconds"]; ok && !isEmptyValue(value) {
-			input["duration"] = normalizeKIEDurationValue(value, config.durationKind)
+			input["duration"] = normalizeKIEDurationInput(value, config)
 		}
 	}
 
@@ -338,13 +338,13 @@ func normalizeKIEInputFields(input map[string]any, modelName string) {
 	} else {
 		if value, ok := input["seconds"]; ok {
 			if !isEmptyValue(value) {
-				input["duration"] = normalizeKIEDurationValue(value, config.durationKind)
+				input["duration"] = normalizeKIEDurationInput(value, config)
 			}
 			delete(input, "seconds")
 		}
 
 		if value, ok := input["duration"]; ok {
-			input["duration"] = normalizeKIEDurationValue(value, config.durationKind)
+			input["duration"] = normalizeKIEDurationInput(value, config)
 		}
 	}
 
@@ -779,6 +779,8 @@ type kieInputConfig struct {
 	aspectField     string
 	aspectKind      string
 	durationKind    string
+	durationMin     int
+	durationMax     int
 	hasResolution   bool
 	resolutionField string
 	resolutionKind  string
@@ -810,8 +812,8 @@ func kieModelInputConfig(modelName string) kieInputConfig {
 		"bytedance/v1-pro-text-to-video":       {aspectField: "aspect_ratio", durationKind: "string", hasResolution: true},
 
 		"gemini-omni-video":                 {aspectField: "aspect_ratio", durationKind: "string", hasResolution: true, imageRefField: "image_urls", imageRefKind: "array", videoRefField: "video_list", videoRefKind: "gemini_video_list", audioRefField: "audio_ids", audioRefKind: "array"},
-		"grok-imagine/image-to-video":       {aspectField: "aspect_ratio", durationKind: "string", hasResolution: true, presetField: "mode", imageRefField: "image_urls", imageRefKind: "array"},
-		"grok-imagine/text-to-video":        {aspectField: "aspect_ratio", durationKind: "string", hasResolution: true, presetField: "mode"},
+		"grok-imagine/image-to-video":       {aspectField: "aspect_ratio", durationKind: "string", durationMin: 6, durationMax: 30, hasResolution: true, presetField: "mode", imageRefField: "image_urls", imageRefKind: "array"},
+		"grok-imagine/text-to-video":        {aspectField: "aspect_ratio", durationKind: "string", durationMin: 6, durationMax: 30, hasResolution: true, presetField: "mode"},
 		"grok-imagine-video-1-5-preview":    {aspectField: "aspect_ratio", durationKind: "number", hasResolution: true, imageRefField: "image_urls", imageRefKind: "array"},
 		"happyhorse/image-to-video":         {durationKind: "number", hasResolution: true, imageRefField: "image_urls", imageRefKind: "array"},
 		"happyhorse/reference-to-video":     {aspectField: "aspect_ratio", durationKind: "number", hasResolution: true, imageRefField: "reference_image", imageRefKind: "array"},
@@ -913,6 +915,42 @@ func kieModelInputConfig(modelName string) kieInputConfig {
 		return config
 	}
 	return kieInputConfig{}
+}
+
+func normalizeKIEDurationInput(value any, config kieInputConfig) any {
+	normalized := normalizeKIEDurationValue(value, config.durationKind)
+	if config.durationMin <= 0 && config.durationMax <= 0 {
+		return normalized
+	}
+	duration, ok := readKIEDurationInt(normalized)
+	if !ok {
+		return normalized
+	}
+	if config.durationMin > 0 && duration < config.durationMin {
+		duration = config.durationMin
+	}
+	if config.durationMax > 0 && duration > config.durationMax {
+		duration = config.durationMax
+	}
+	if config.durationKind == "number" {
+		return duration
+	}
+	return strconv.Itoa(duration)
+}
+
+func readKIEDurationInt(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case float64:
+		return int(typed), true
+	case string:
+		parsed, err := strconv.Atoi(normalizeKIEDurationString(typed))
+		return parsed, err == nil
+	default:
+		parsed, err := strconv.Atoi(normalizeKIEDurationString(toStringSafe(value)))
+		return parsed, err == nil
+	}
 }
 
 func normalizeKIEDurationValue(value any, durationKind string) any {

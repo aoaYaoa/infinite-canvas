@@ -2,6 +2,7 @@ import axios from "axios";
 
 import { dataUrlToFile } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/lib/seedance-video";
+import { isKIEGrokVideoModel } from "@/components/video-settings-panel";
 import { modelKey, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
@@ -221,7 +222,8 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
         if (isSeedanceVideoConfig(config)) body.append("size", normalizeSeedanceRatio(config.size));
         else if (size) body.append("size", size);
         body.append("resolution_name", normalizeVideoResolution(config.vquality));
-        body.append("preset", "normal");
+        if (isKIEGrokVideoModel(config, model)) body.append("mode", normalizeGrokVideoMode(config.videoMode));
+        else body.append("preset", "normal");
     }
     if (motionControl) body.append("character_orientation", normalizeCharacterOrientation(config.videoCharacterOrientation));
     if (supportsVideoAudioGeneration(model)) body.append("video_generate_audio", String(boolConfig(config.videoGenerateAudio, false)));
@@ -291,6 +293,10 @@ function normalizeKlingV26Duration(value: string) {
 
 function normalizeKlingV3Mode(value: string) {
     return value === "4k" ? "4k" : value === "pro" ? "pro" : "std";
+}
+
+function normalizeGrokVideoMode(value: string) {
+    return value === "fun" || value === "spicy" ? value : "normal";
 }
 
 function normalizeKlingV3Duration(value: string) {
@@ -439,7 +445,7 @@ function videoPollId(model: string, task: VideoResponse) {
 
 function normalizeVideoSeconds(value: string) {
     const seconds = Math.floor(Number(value) || 6);
-    return String(Math.max(1, Math.min(20, seconds)));
+    return String(Math.max(1, Math.min(30, seconds)));
 }
 
 function isGeminiOmniFlashVideoModel(model: string) {

@@ -1394,7 +1394,7 @@ function WorkbenchPanel({
                                 <>
                                     <QuickSelect label="清晰度" value={normalizeVideoResolutionValue(config.vquality)} options={quickResolutionOptions} onChange={(value) => updateConfig("vquality", value)} />
                                     <QuickSelect label="尺寸" value={normalizeVideoSizeValue(config.size)} options={quickSizeOptions} onChange={(value) => updateConfig("size", value)} />
-                                    <QuickNumber label="秒数" value={normalizeVideoSeconds(config.videoSeconds)} min={1} max={20} onChange={(value) => updateConfig("videoSeconds", value)} />
+                                    <QuickNumber label="秒数" value={normalizeVideoSeconds(config.videoSeconds)} min={1} max={30} onChange={(value) => updateConfig("videoSeconds", value)} />
                                     {audioGenerationEnabled ? <QuickSwitch label="生成音频" checked={generateAudio} onChange={(checked) => updateConfig("videoGenerateAudio", String(checked))} /> : null}
                                     {motionControl ? <QuickSelect label="角色朝向参考" value={normalizeCharacterOrientation(config.videoCharacterOrientation)} options={characterOrientationOptions} onChange={(value) => updateConfig("videoCharacterOrientation", value)} /> : null}
                                 </>
@@ -2938,7 +2938,7 @@ function normalizeKlingV3Seconds(value: string) {
 function normalizeVideoSeconds(value: string) {
     if (String(value).trim() === "-1") return "-1";
     const seconds = Math.floor(Number(value) || 6);
-    return String(Math.max(1, Math.min(20, seconds)));
+    return String(Math.max(1, Math.min(30, seconds)));
 }
 
 function normalizeVideoSize(value: string) {

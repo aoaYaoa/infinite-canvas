@@ -61,6 +61,7 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
     }
 
     const model = modelName || config.model || config.videoModel;
+    const grokMode = config.videoMode === "fun" || config.videoMode === "spicy" ? config.videoMode : "normal";
     const seconds = config.videoSeconds || "6";
     const size = normalizeVideoSizeValue(config.size);
     const dimensions = readSizeDimensions(size);
@@ -76,6 +77,17 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="text-lg font-semibold">视频设置</div> : null}
+                {isKIEGrokVideoModel(config, model) ? (
+                    <SettingGroup title="模式选择" color={theme.node.muted}>
+                        <div className="grid grid-cols-3 gap-2.5">
+                            {grokVideoModeOptions.map((item) => (
+                                <OptionPill key={item.value} selected={grokMode === item.value} theme={theme} onClick={() => onConfigChange("videoMode", item.value)}>
+                                    {item.title}
+                                </OptionPill>
+                            ))}
+                        </div>
+                    </SettingGroup>
+                ) : null}
                 <SettingGroup title="清晰度" color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">
                         {resolutionOptions.map((item) => (
@@ -120,7 +132,7 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
                                 {value}s
                             </OptionPill>
                         ))}
-                        <NumberInput value={seconds} min={1} max={20} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                        <NumberInput value={seconds} min={1} max={30} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
                     </div>
                 </SettingGroup>
                 {audioGenerationEnabled ? <AudioGenerationSetting checked={generateAudio} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} /> : null}
@@ -441,4 +453,20 @@ function readSizeDimensions(size: string) {
     if (size === "auto") return { width: 0, height: 0 };
     const match = size.match(/^(\d+)x(\d+)$/);
     return { width: Number(match?.[1]) || 1280, height: Number(match?.[2]) || 720 };
+}
+
+const grokVideoModeOptions = [
+    { value: "fun", title: "Fun" },
+    { value: "normal", title: "Normal" },
+    { value: "spicy", title: "Spicy" },
+] as const;
+
+export function isKIEGrokVideoModel(config: AiConfig, modelName: string) {
+    const model = (modelName || "").toLowerCase().trim();
+    if (model !== "grok-imagine/text-to-video" && model !== "grok-imagine/image-to-video") return false;
+    const scopedConfig = { ...config, model, videoModel: model };
+    const channelId = channelIdForActiveModel(scopedConfig);
+    const channels = config.channelMode === "remote" ? config.publicChannels : [localChannelForActiveModel(scopedConfig)];
+    const channel = channels.find((item) => (item?.id || "") === channelId) || channels[0];
+    return ((channel as { baseUrl?: string } | undefined)?.baseUrl || "").toLowerCase().includes("kie");
 }
