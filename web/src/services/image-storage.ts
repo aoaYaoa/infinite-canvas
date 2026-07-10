@@ -73,6 +73,29 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
     return { url: urlObj, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType };
 }
 
+export async function uploadRemoteImageToServer(url: string, filename: string): Promise<UploadedImage> {
+    const response = await fetch(getProxyUrl(url));
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { msg?: string } | null;
+        throw new Error(payload?.msg || "代理图片拉取失败：" + response.status);
+    }
+    const blob = await response.blob();
+    const config = await loadStorageConfig();
+    const userProvider = config.allowUserProvider ? loadUserStorageProvider() : null;
+    if (config.mode !== "server_sqlite_s3" && (config.mode !== "hybrid" || !userProvider)) throw new Error("服务端对象存储未启用");
+    const token = useUserStore.getState().token;
+    if (!token) throw new Error("服务端存储需要先登录");
+    const formData = new FormData();
+    formData.append("file", blob, filename || "image-" + nanoid() + "." + imageExtension(blob.type));
+    if (userProvider) formData.append("provider", JSON.stringify(toProviderPayload(userProvider)));
+    const uploadResponse = await fetch("/api/v1/files", { method: "POST", headers: { Authorization: "Bearer " + token }, body: formData });
+    const payload = (await uploadResponse.json().catch(() => null)) as { code?: number; msg?: string; data?: UploadedImage } | null;
+    if (!uploadResponse.ok || payload?.code !== 0 || !payload.data) throw new Error(payload?.msg || "服务端图片上传失败");
+    const meta = await readImageMeta(payload.data.url);
+    if (payload.data.storageKey?.startsWith("server:")) serverUrls.set(payload.data.storageKey.slice("server:".length), payload.data.url);
+    return { ...payload.data, width: payload.data.width || meta.width, height: payload.data.height || meta.height, mimeType: payload.data.mimeType || blob.type || "image/png", bytes: payload.data.bytes || blob.size };
+}
+
 export function clearStorageConfigCache() {
     storageConfigPromise = null;
 }

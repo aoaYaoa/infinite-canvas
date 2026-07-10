@@ -7,6 +7,7 @@ import {
     ChevronDown,
     ChevronUp,
     ClipboardPaste,
+    CloudUpload,
     Copy,
     Download,
     FolderPlus,
@@ -46,7 +47,7 @@ import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { ImageRequestError, batchCanvasImageTaskStatus, createCanvasImageTask, deleteCanvasImageTask, listCanvasImageTasks, requestEdit, requestGeneration, type CanvasImageTask } from "@/services/api/image";
 import { deleteImageGenerationLogs, fetchImageGenerationLogs, saveImageGenerationLogs } from "@/services/api/generation-logs";
-import { deleteStoredImages, imageToDataUrl, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { deleteStoredImages, imageToDataUrl, resolveImageUrl, uploadImage, uploadRemoteImageToServer } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
@@ -144,6 +145,7 @@ export default function ImagePage() {
     const [uploadingCount, setUploadingCount] = useState(0);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
+    const [syncingImageIds, setSyncingImageIds] = useState<string[]>([]);
     const [categories, setCategories] = useState<GenerationCategory[]>([]);
     const [resultViewMode, setResultViewModeState] = useState<ResultViewMode>("all");
     const [activeResultCategoryId, setActiveResultCategoryId] = useState<string | null>(null);
@@ -485,15 +487,9 @@ export default function ImagePage() {
                     throw new Error("接口没有返回图片");
                 }
 
-                // 立即存储图片
-                const stored = await uploadImage(image.dataUrl);
-                const durableImage = { 
-                    ...image, 
-                    storageKey: stored.storageKey, 
-                    width: stored.width, 
-                    height: stored.height, 
-                    bytes: stored.bytes, 
-                    mimeType: stored.mimeType 
+                const durableImage = {
+                    ...image,
+                    storageKey: "",
                 };
                 
                 // 更新结果状态
@@ -596,6 +592,45 @@ export default function ImagePage() {
             metadata: { source: "image-page", prompt },
         });
         message.success("已加入我的素材");
+    };
+
+    const syncImage = async (image: GeneratedImage, index: number) => {
+        if (image.storageKey?.startsWith("server:") || syncingImageIds.includes(image.id)) return null;
+        setSyncingImageIds((ids) => Array.from(new Set([...ids, image.id])));
+        const hideLoading = message.loading("正在同步图片到云端存储...", 0);
+        try {
+            const uploaded = await uploadRemoteImageToServer(image.dataUrl, "image-" + (index + 1) + "." + imageExtension(image.mimeType || image.dataUrl));
+            message.success("图片已同步到云端存储");
+            return { ...image, dataUrl: uploaded.url, storageKey: uploaded.storageKey, width: uploaded.width || image.width, height: uploaded.height || image.height, bytes: uploaded.bytes || image.bytes, mimeType: uploaded.mimeType || image.mimeType };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "";
+            if (errorMessage.includes("服务端对象存储未启用") || errorMessage.includes("用户对象存储配置不完整")) {
+                message.error("未添加云存储");
+            } else {
+                message.error(errorMessage || "图片同步失败");
+            }
+            return null;
+        } finally {
+            hideLoading();
+            setSyncingImageIds((ids) => ids.filter((id) => id !== image.id));
+        }
+    };
+
+    const syncResultImage = async (resultId: string, image: GeneratedImage, index: number) => {
+        const synced = await syncImage(image, index);
+        if (!synced) return;
+        setResults((value) => updateResult(value, resultId, { image: synced }));
+    };
+
+    const syncLogImage = async (log: GenerationLog, image: GeneratedImage, index: number) => {
+        const synced = await syncImage(image, index);
+        if (!synced) return;
+        const nextLog = { ...log, images: log.images.map((item) => item.id === image.id ? synced : item) };
+        await logStore.setItem(log.id, serializeLog(nextLog));
+        const nextLogs = logs.map((item) => item.id === log.id ? nextLog : item);
+        setLogs(nextLogs);
+        await persistImageHistory(nextLogs, categories);
+        if (previewLog?.id === log.id) setPreviewLog(nextLog);
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
@@ -1080,6 +1115,9 @@ export default function ImagePage() {
                             onEdit={addResultToReferences}
                             onDownload={downloadImage}
                             onSaveAsset={saveResultToAssets}
+                            syncingImageIds={syncingImageIds}
+                            onSyncResult={syncResultImage}
+                            onSyncLog={syncLogImage}
                             onRetry={retryResult}
                         />
                     </>
@@ -1113,6 +1151,9 @@ export default function ImagePage() {
                             onEdit={addResultToReferences}
                             onDownload={downloadImage}
                             onSaveAsset={saveResultToAssets}
+                            syncingImageIds={syncingImageIds}
+                            onSyncResult={syncResultImage}
+                            onSyncLog={syncLogImage}
                             onRetry={retryResult}
                         />
                         <WorkbenchPanel
@@ -1532,6 +1573,9 @@ function ResultsPanel({
     onEdit,
     onDownload,
     onSaveAsset,
+    syncingImageIds,
+    onSyncResult,
+    onSyncLog,
     onRetry,
 }: {
     className?: string;
@@ -1561,6 +1605,9 @@ function ResultsPanel({
     onEdit: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
+    syncingImageIds: string[];
+    onSyncResult: (resultId: string, image: GeneratedImage, index: number) => void;
+    onSyncLog: (log: GenerationLog, image: GeneratedImage, index: number) => void;
     onRetry: (result: GenerationResult) => void;
 }) {
     const { message } = App.useApp();
@@ -1637,7 +1684,7 @@ function ResultsPanel({
                 <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                     {results.map((result, index) =>
                         result.status === "success" && result.image ? (
-                            <ResultImageCard key={result.id} result={result} image={result.image} index={index} onCopyPrompt={onCopyPrompt} onEdit={onEdit} onDownload={onDownload} onSaveAsset={onSaveAsset} />
+                            <ResultImageCard key={result.id} result={result} image={result.image} index={index} onCopyPrompt={onCopyPrompt} onEdit={onEdit} onDownload={onDownload} onSaveAsset={onSaveAsset} syncing={syncingImageIds.includes(result.image.id)} onSync={(image) => onSyncResult(result.id, image, index)} />
                         ) : result.status === "failed" ? (
                             <FailedImageCard key={result.id} result={result} error={result.error || "生成失败"} onCopyPrompt={onCopyPrompt} onRetry={() => onRetry(result)} />
                         ) : (
@@ -1672,6 +1719,8 @@ function ResultsPanel({
                             onEdit={onEdit}
                             onDownload={onDownload}
                             onSaveAsset={onSaveAsset}
+                            syncing={syncingImageIds.includes(log.images.find((image) => Boolean(image.dataUrl))?.id || "")}
+                            onSync={(image) => onSyncLog(log, image, index)}
                         />
                     ))}
                 </div>
@@ -1795,6 +1844,8 @@ function ResultImageCard({
     onEdit,
     onDownload,
     onSaveAsset,
+    syncing,
+    onSync,
 }: {
     result: GenerationResult;
     image: GeneratedImage;
@@ -1803,13 +1854,16 @@ function ResultImageCard({
     onEdit: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
+    syncing: boolean;
+    onSync: (image: GeneratedImage) => void;
 }) {
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
             <div className="relative aspect-[4/3] bg-stone-100 dark:bg-stone-900">
-                <Tag className="absolute right-1.5 top-1.5 z-10 m-0 text-[10px]" color="blue">
-                    新生成
-                </Tag>
+                <div className="absolute right-1.5 top-1.5 z-10 flex gap-1">
+                    {!image.storageKey?.startsWith("server:") ? <Tag className="m-0 text-[10px]" color="gold">临时URL</Tag> : null}
+                    <Tag className="m-0 text-[10px]" color="blue">新生成</Tag>
+                </div>
                 <ReferenceThumbnailOverlay references={result.references} className="left-1.5 top-1.5" />
                 <Image src={image.dataUrl} alt={`生成结果 ${index + 1}`} className="aspect-[4/3] object-cover" />
             </div>
@@ -1823,6 +1877,7 @@ function ResultImageCard({
                     <span>{formatDuration(image.durationMs)}</span>
                 </div>
                 <div className="flex shrink-0 gap-1">
+                    <Button size="small" title="同步到云端存储" icon={<CloudUpload className="size-3.5" />} loading={syncing} disabled={image.storageKey?.startsWith("server:")} onClick={() => onSync(image)} />
                     <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)} />
                     <Button size="small" icon={<PenLine className="size-3.5" />} onClick={() => void onEdit(image, index)} />
                     <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)} />
@@ -1935,6 +1990,8 @@ function HistoryLogCard({
     onEdit,
     onDownload,
     onSaveAsset,
+    syncing,
+    onSync,
 }: {
     log: GenerationLog;
     categories: GenerationCategory[];
@@ -1952,6 +2009,8 @@ function HistoryLogCard({
     onEdit: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
+    syncing: boolean;
+    onSync: (image: GeneratedImage) => void;
 }) {
     const displayImages = log.images.filter((image) => Boolean(image.dataUrl));
     const firstImage = displayImages[0];
@@ -1990,6 +2049,7 @@ function HistoryLogCard({
                     {selected ? <Button size="small" danger type="text" icon={<Trash2 className="size-3.5" />} onClick={onDelete} /> : null}
                 </div>
                 <div className="absolute right-1.5 top-1.5 z-10 flex gap-1">
+                    {firstImage && !firstImage.storageKey?.startsWith("server:") ? <Tag className="m-0 text-[10px]" color="gold">临时URL</Tag> : null}
                     <Tag className="m-0 text-[10px]" color={log.status === "生成中" ? "processing" : log.failCount ? "red" : "blue"}>
                         {log.status === "生成中" ? "生成中" : log.failCount ? `失败 ${log.failCount}` : "成功"}
                     </Tag>
@@ -2088,6 +2148,7 @@ function HistoryLogCard({
                 </div>
                 {firstImage ? (
                     <div className="flex shrink-0 gap-1">
+                        <Button size="small" title="同步到云端存储" icon={<CloudUpload className="size-3.5" />} loading={syncing} disabled={firstImage.storageKey?.startsWith("server:")} onClick={() => closeThen(() => onSync(firstImage))} />
                         <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => closeThen(() => void onSaveAsset(firstImage, index))} />
                         <Button size="small" icon={<PenLine className="size-3.5" />} onClick={() => closeThen(() => void onEdit(firstImage, index))} />
                         <Button size="small" icon={<Download className="size-3.5" />} onClick={() => closeThen(() => onDownload(firstImage, index))} />

@@ -243,30 +243,21 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 		saveFailedCanvasImageTask(task, message, string(payload))
 		return
 	}
-	imageData, mimeType, err := imageBytesFromAIResponse(payload)
+	imageURL, mimeType, bytes, err := imageURLFromAIResponse(payload)
 	if err != nil {
 		saveFailedCanvasImageTask(task, err.Error(), string(payload))
-		return
-	}
-	if mimeType == "" {
-		mimeType = http.DetectContentType(imageData)
-	}
-	width, height := imageSize(imageData)
-	object, err := service.UploadStorageObject(service.WithUser(context.Background(), user), "canvas-image"+extensionForTaskMime(mimeType), mimeType, imageData)
-	if err != nil {
-		saveFailedCanvasImageTask(task, err.Error(), err.Error())
 		return
 	}
 	task.Status = "completed"
 	task.Progress = 100
 	task.CompletedAt = taskTime()
 	task.ResponseBody = string(payload)
-	task.ImageURL = object.URL
-	task.StorageKey = object.StorageKey
-	task.MimeType = object.MimeType
-	task.Bytes = object.Bytes
-	task.Width = width
-	task.Height = height
+	task.ImageURL = imageURL
+	task.StorageKey = ""
+	task.MimeType = mimeType
+	task.Bytes = bytes
+	task.Width = 0
+	task.Height = 0
 	task.Error = ""
 	task.ErrorDetail = ""
 	_, _ = service.SaveCanvasImageTask(task)
@@ -493,6 +484,27 @@ func imageBytesFromAIResponse(payload []byte) ([]byte, string, error) {
 		}
 	}
 	return nil, "", errors.New("图片接口没有返回图片")
+}
+
+func imageURLFromAIResponse(payload []byte) (string, string, int64, error) {
+	var root any
+	if err := json.Unmarshal(payload, &root); err != nil {
+		return "", "", 0, err
+	}
+	for _, candidate := range collectImageCandidates(root, 0) {
+		if strings.HasPrefix(candidate, "http://") || strings.HasPrefix(candidate, "https://") {
+			return candidate, "", 0, nil
+		}
+		data, mimeType, err := imageCandidateBytes(candidate)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		if strings.HasPrefix(candidate, "data:image/") {
+			return candidate, mimeType, int64(len(data)), nil
+		}
+		return "data:" + mimeType + ";base64," + candidate, mimeType, int64(len(data)), nil
+	}
+	return "", "", 0, errors.New("图片接口没有返回图片")
 }
 
 func collectImageCandidates(value any, depth int) []string {

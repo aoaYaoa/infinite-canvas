@@ -10,8 +10,8 @@ import { createCanvasImageTask, pollCanvasImageTaskStatus, requestImageQuestion,
 import { createCanvasAudioTask, pollCanvasAudioTaskStatus, type CanvasAudioTask } from "@/services/api/audio";
 import { createVideoGenerationTask, pollVideoGenerationTaskStatus, VIDEO_POLL_INTERVAL_MS, type VideoResponse } from "@/services/api/video";
 import { defaultConfig, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
-import { collectImageStorageKeys, deleteStoredImages, resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
-import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { collectImageStorageKeys, deleteStoredImages, resolveImageUrl, uploadImage, uploadRemoteImageToServer, type UploadedImage } from "@/services/image-storage";
+import { resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
@@ -225,6 +225,8 @@ function InfiniteCanvasPage() {
     const didInitialCenterRef = useRef(false);
     const rafRef = useRef<number | null>(null);
     const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const uploadingVideoNodeIdsRef = useRef(new Set<string>());
+    const uploadingImageNodeIdsRef = useRef(new Set<string>());
     const nodeDraggingRef = useRef(false);
     const dragRef = useRef<{
         isDraggingNode: boolean;
@@ -1583,6 +1585,72 @@ function InfiniteCanvasPage() {
         saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
     }, []);
 
+    const uploadNodeVideoToCloud = useCallback(async (node: CanvasNodeData) => {
+        if (node.type !== CanvasNodeType.Video || !node.metadata?.content || node.metadata.storageKey?.startsWith("server:") || uploadingVideoNodeIdsRef.current.has(node.id)) return;
+        uploadingVideoNodeIdsRef.current.add(node.id);
+        const hideLoading = message.loading("正在上传视频至云存储...", 0);
+        try {
+            const videoUrl = await resolveMediaUrl(node.metadata.storageKey, node.metadata.content);
+            const uploaded = await uploadRemoteMediaToServer(videoUrl, "canvas-video-" + node.id + ".mp4");
+            setNodes((nodes) => nodes.map((item) => (item.id === node.id ? {
+                ...item,
+                metadata: {
+                    ...item.metadata,
+                    content: uploaded.url,
+                    storageKey: uploaded.storageKey,
+                    bytes: uploaded.bytes,
+                    mimeType: uploaded.mimeType,
+                    naturalWidth: uploaded.width || item.metadata?.naturalWidth,
+                    naturalHeight: uploaded.height || item.metadata?.naturalHeight,
+                },
+            } : item)));
+            message.success("视频已上传至云存储");
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "";
+            if (errorMessage.includes("服务端对象存储未启用") || errorMessage.includes("用户对象存储配置不完整")) {
+                message.error("未添加云存储");
+            } else {
+                message.error(errorMessage || "视频上传失败");
+            }
+        } finally {
+            hideLoading();
+            uploadingVideoNodeIdsRef.current.delete(node.id);
+        }
+    }, [message]);
+
+    const uploadNodeImageToCloud = useCallback(async (node: CanvasNodeData) => {
+        if (node.type !== CanvasNodeType.Image || !node.metadata?.content || node.metadata.storageKey?.startsWith("server:") || uploadingImageNodeIdsRef.current.has(node.id)) return;
+        uploadingImageNodeIdsRef.current.add(node.id);
+        const hideLoading = message.loading("正在上传图片至云存储...", 0);
+        try {
+            const imageUrl = await resolveImageUrl(node.metadata.storageKey, node.metadata.content);
+            const uploaded = await uploadRemoteImageToServer(imageUrl, "canvas-image-" + node.id + ".png");
+            setNodes((nodes) => nodes.map((item) => (item.id === node.id ? {
+                ...item,
+                metadata: {
+                    ...item.metadata,
+                    content: uploaded.url,
+                    storageKey: uploaded.storageKey,
+                    bytes: uploaded.bytes,
+                    mimeType: uploaded.mimeType,
+                    naturalWidth: uploaded.width || item.metadata?.naturalWidth,
+                    naturalHeight: uploaded.height || item.metadata?.naturalHeight,
+                },
+            } : item)));
+            message.success("图片已上传至云存储");
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "";
+            if (errorMessage.includes("服务端对象存储未启用") || errorMessage.includes("用户对象存储配置不完整")) {
+                message.error("未添加云存储");
+            } else {
+                message.error(errorMessage || "图片上传失败");
+            }
+        } finally {
+            hideLoading();
+            uploadingImageNodeIdsRef.current.delete(node.id);
+        }
+    }, [message]);
+
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {
             if (node.type === CanvasNodeType.Text) {
@@ -2409,7 +2477,7 @@ function InfiniteCanvasPage() {
 
     const insertAssistantImage = useCallback(
         async (image: CanvasAssistantImage) => {
-            const storedImage = image.storageKey || image.source === "asset" || image.source === "library" ? { url: image.dataUrl, storageKey: image.storageKey || "", width: 1, height: 1, bytes: 0, mimeType: "image/png" } : await uploadImage(image.dataUrl);
+            const storedImage = { url: image.dataUrl, storageKey: image.storageKey || "", width: 1, height: 1, bytes: 0, mimeType: "image/png" };
             const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
             const config = fitNodeSize(meta.width, meta.height);
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
@@ -2661,6 +2729,8 @@ function InfiniteCanvasPage() {
                     onUpload={(node) => handleUploadRequest(node.id)}
                     onDownload={downloadNodeImage}
                     onSaveAsset={(node) => void saveNodeAsset(node)}
+                    onUploadVideoToCloud={(node) => void uploadNodeVideoToCloud(node)}
+                    onUploadImageToCloud={(node) => void uploadNodeImageToCloud(node)}
                     onMaskEdit={(node) => {
                         const nodeConfig = buildGenerationConfig(effectiveConfig, node, "image");
                         setMaskEditModel(nodeConfig.model);

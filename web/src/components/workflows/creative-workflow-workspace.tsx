@@ -840,18 +840,16 @@ export function CreativeWorkflowWorkspace({
             const storedImages = await Promise.all(
                 flattened.map(async (image) => {
                     const meta = await readImageMeta(image.dataUrl);
-                    const stored = await uploadImage(image.dataUrl);
-                    const persistedUrl = stored.url || image.dataUrl;
                     return {
                         id: image.id,
-                        dataUrl: persistedUrl,
-                        displayUrl: stored.url,
-                        storageKey: stored.storageKey,
+                        dataUrl: image.dataUrl,
+                        displayUrl: image.dataUrl,
+                        storageKey: "",
                         durationMs,
-                        width: stored.width || meta.width,
-                        height: stored.height || meta.height,
-                        bytes: stored.bytes || getDataUrlByteSize(image.dataUrl),
-                        mimeType: stored.mimeType || meta.mimeType,
+                        width: meta.width,
+                        height: meta.height,
+                        bytes: getDataUrlByteSize(image.dataUrl),
+                        mimeType: meta.mimeType,
                     };
                 }),
             );
