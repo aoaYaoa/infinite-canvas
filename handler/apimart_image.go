@@ -101,6 +101,11 @@ func apimartImageConfig(modelName string) apimartInputConfig {
 		config.hasQuality = false
 		config.hasCount = false
 		config.imageRefField = ""
+	case strings.Contains(model, "seedream-5-0-pro"):
+		config.resolutionCase = "upper"
+		config.maxResolution = "2K"
+		config.hasCount = false
+		config.maxImageRefs = 10
 	case strings.Contains(model, "seedream-5"):
 		config.resolutionCase = "upper"
 		config.minResolution = "2K"

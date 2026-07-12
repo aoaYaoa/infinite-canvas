@@ -45,7 +45,7 @@ const emptySettings: AdminSettings = {
     private: { channels: [], promptSync: { enabled: true, cron: "0 0 * * *" }, aiLog: { localDirectReportEnabled: false, cleanup: { enabled: false, retentionDays: 14, cron: "0 3 * * *" } }, auth: { linuxDo: { clientId: "", clientSecret: "" } }, storage: { mode: "local_indexeddb", allowUserProvider: false, providers: [], roundRobinCursor: 0, capacityCheck: { enabled: false, cron: "0 */6 * * *" }, capacityLimitBytes: 9 * 1024 * 1024 * 1024 } },
 };
 const emptyChannel: AdminModelChannel = { id: "", protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, timeout: 600, enabled: true, remark: "" };
-const emptyStorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "images", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
+const emptyStorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "canvas", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
 
 type SettingsTabKey = "public" | "private";
 type EditorMode = "visual" | "json";
@@ -716,7 +716,7 @@ export default function AdminSettingsPage() {
                                                             </Col>
                                                             <Col xs={24} md={3}>
                                                                 <Form.Item name={[field.name, "pathPrefix"]} label="路径前缀">
-                                                                    <Input placeholder="images" />
+                                                                    <Input placeholder="canvas" />
                                                                 </Form.Item>
                                                             </Col>
                                                             <Col xs={24} md={3}>

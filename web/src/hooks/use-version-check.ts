@@ -15,8 +15,8 @@ function readLocalReleases(): ReleaseInfo[] {
 }
 
 function toVersionParts(version: string) {
-    const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)/);
-    return match ? match.slice(1).map(Number) : null;
+    const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)\.?(\d+)?/);
+    return match ? match.slice(1).filter(Boolean).map(Number) : null;
 }
 
 function isNewerVersion(latestVersion: string, currentVersion: string) {

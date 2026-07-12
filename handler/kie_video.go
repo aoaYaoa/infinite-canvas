@@ -130,9 +130,11 @@ func mergeKIEPayloadIntoInput(payload map[string]any, input map[string]any, mode
 
 	if value, ok := payload["size"]; ok && !isEmptyValue(value) {
 		setKIEAspectInput(input, modelName, value)
+		applyKIESizeQualityInput(input, modelName, value, payload)
 	}
 	if value, ok := payload["image_size"]; ok && !isEmptyValue(value) {
 		setKIEAspectInput(input, modelName, value)
+		applyKIESizeQualityInput(input, modelName, value, payload)
 	}
 	if value, ok := payload["ratio"]; ok && !isEmptyValue(value) {
 		setKIEAspectInput(input, modelName, value)
@@ -493,13 +495,33 @@ func normalizeKIEImageQuality(modelName string, value any) string {
 		}
 		return "medium"
 	case strings.HasPrefix(model, "seedream/4.5") || strings.HasPrefix(model, "seedream/5-lite"):
-		if quality == "high" {
+		if quality == "high" || quality == "4k" {
+			return "high"
+		}
+		return "basic"
+	case strings.HasPrefix(model, "seedream/5-pro"):
+		if quality == "high" || quality == "2k" {
 			return "high"
 		}
 		return "basic"
 	default:
 		return quality
 	}
+}
+
+func applyKIESizeQualityInput(input map[string]any, modelName string, value any, payload map[string]any) {
+	config := kieModelInputConfig(modelName)
+	if !config.hasQuality || kieResolutionField(config) != "" {
+		return
+	}
+	if payloadQuality, ok := payload["quality"]; ok && !isEmptyValue(payloadQuality) && strings.ToLower(strings.TrimSpace(toStringSafe(payloadQuality))) != "auto" {
+		return
+	}
+	resolution := normalizeKIESizeResolution(toStringSafe(value))
+	if resolution == "" {
+		return
+	}
+	input["quality"] = normalizeKIEImageQuality(modelName, resolution)
 }
 
 func normalizeKIEKlingV3VideoInput(input map[string]any, modelName string) {
@@ -700,7 +722,7 @@ func validateKIERequiredInputs(input map[string]any, modelName string) error {
 		return requireKIEAnyInput(input, "reference_image")
 	case "flux-2/flex-image-to-image", "flux-2/pro-image-to-image", "gpt-image-2-image-to-image", "gpt-image/1.5-image-to-image":
 		return requireKIEAnyInput(input, "input_urls")
-	case "google/nano-banana-edit", "grok-imagine/image-to-image", "seedream/4.5-edit", "seedream/5-lite-image-to-image", "bytedance/seedream-v4-edit":
+	case "google/nano-banana-edit", "grok-imagine/image-to-image", "seedream/4.5-edit", "seedream/5-lite-image-to-image", "seedream/5-pro-image-to-image", "bytedance/seedream-v4-edit":
 		return requireKIEAnyInput(input, "image_urls")
 	case "qwen/image-to-image", "qwen/image-edit", "qwen2/image-edit", "ideogram/v3-remix":
 		return requireKIEAnyInput(input, "image_url")
@@ -905,6 +927,8 @@ func kieModelInputConfig(modelName string) kieInputConfig {
 		"seedream/4.5-text-to-image":     {aspectField: "aspect_ratio", hasQuality: true},
 		"seedream/5-lite-image-to-image": {aspectField: "aspect_ratio", hasQuality: true, imageRefField: "image_urls", imageRefKind: "array"},
 		"seedream/5-lite-text-to-image":  {aspectField: "aspect_ratio", hasQuality: true},
+		"seedream/5-pro-text-to-image":  {aspectField: "aspect_ratio", hasQuality: true},
+		"seedream/5-pro-image-to-image": {aspectField: "aspect_ratio", hasQuality: true, imageRefField: "image_urls", imageRefKind: "array"},
 		"topaz/image-upscale":            {imageRefField: "image_url", imageRefKind: "single"},
 		"topaz/video-upscale":            {videoRefField: "video_url", videoRefKind: "single"},
 		"infinitalk/from-audio":          {hasResolution: true, imageRefField: "image_url", imageRefKind: "single", audioRefField: "audio_url", audioRefKind: "single"},

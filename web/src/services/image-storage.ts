@@ -256,7 +256,7 @@ export function defaultUserStorageProvider(): UserStorageProvider {
         accessKeyId: "",
         secretAccessKey: "",
         publicBaseUrl: "",
-        pathPrefix: "images",
+        pathPrefix: "canvas",
     };
 }
 

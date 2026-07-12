@@ -530,6 +530,8 @@ func kieMarketModels() []string {
 		"seedream/4.5-edit",
 		"seedream/5-lite-text-to-image",
 		"seedream/5-lite-image-to-image",
+		"seedream/5-pro-text-to-image",
+		"seedream/5-pro-image-to-image",
 		"z-image",
 		"nano-banana-2",
 		"nano-banana-2-lite",
