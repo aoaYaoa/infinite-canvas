@@ -22,6 +22,7 @@ import { DiaTextReveal } from "@/components/ui/dia-text-reveal";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasNodeType, type CanvasAssistantImage, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
+import { isCanvasImageNodeType } from "../utils/canvas-panorama";
 
 type AssistantMode = "ask" | "image";
 const PANEL_MOTION_MS = 500;
@@ -633,7 +634,7 @@ function assistantImageReferenceLabel(references: CanvasAssistantReference[], in
 }
 
 function nodeToReference(node: CanvasNodeData): CanvasAssistantReference | null {
-    if (node.type === CanvasNodeType.Image && node.metadata?.content) {
+    if (isCanvasImageNodeType(node.type) && node.metadata?.content) {
         return { id: node.id, type: node.type, title: node.title, dataUrl: node.metadata.content, storageKey: node.metadata.storageKey };
     }
     if (node.type === CanvasNodeType.Text && node.metadata?.content) {

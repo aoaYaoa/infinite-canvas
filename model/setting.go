@@ -71,8 +71,9 @@ type PublicSetting struct {
 }
 
 type PublicStorageSetting struct {
-	Mode              string `json:"mode"`
-	AllowUserProvider bool   `json:"allowUserProvider"`
+	Mode                    string `json:"mode"`
+	AllowUserProvider       bool   `json:"allowUserProvider"`
+	AllowUserGlobalProvider bool   `json:"allowUserGlobalProvider"`
 }
 
 type PublicAuthSetting struct {
@@ -105,12 +106,13 @@ type AILogCleanupSetting struct {
 }
 
 type PrivateStorageSetting struct {
-	Mode               string                      `json:"mode"`
-	AllowUserProvider  bool                        `json:"allowUserProvider"`
-	Providers          []StorageProvider           `json:"providers"`
-	RoundRobinCursor   int                         `json:"roundRobinCursor"`
-	CapacityCheck      StorageCapacityCheckSetting `json:"capacityCheck"`
-	CapacityLimitBytes int64                       `json:"capacityLimitBytes"`
+	Mode                    string                      `json:"mode"`
+	AllowUserProvider       bool                        `json:"allowUserProvider"`
+	AllowUserGlobalProvider bool                        `json:"allowUserGlobalProvider"`
+	Providers               []StorageProvider           `json:"providers"`
+	RoundRobinCursor        int                         `json:"roundRobinCursor"`
+	CapacityCheck           StorageCapacityCheckSetting `json:"capacityCheck"`
+	CapacityLimitBytes      int64                       `json:"capacityLimitBytes"`
 }
 
 type StorageProvider struct {

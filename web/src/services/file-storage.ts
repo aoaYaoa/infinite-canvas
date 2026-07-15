@@ -4,14 +4,14 @@ import localforage from "localforage";
 import { nanoid } from "nanoid";
 
 import { apiGet } from "@/services/api/request";
-import { loadUserStorageProvider, type UserStorageProvider } from "@/services/image-storage";
+import { canUseGlobalStorage, loadUserStorageProvider, type StorageConfig, type UserStorageProvider } from "@/services/image-storage";
 import { useUserStore } from "@/stores/use-user-store";
 
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
 
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "media_files" });
 const objectUrls = new Map<string, string>();
-let storageConfigPromise: Promise<{ mode: string; allowUserProvider: boolean }> | null = null;
+let storageConfigPromise: Promise<StorageConfig> | null = null;
 
 export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
@@ -58,7 +58,7 @@ export async function uploadRemoteMediaToServer(url: string, filename: string): 
 async function uploadMediaBlobToServer(blob: Blob, filename: string): Promise<UploadedFile> {
     const config = await loadStorageConfig().catch(() => null);
     const userProvider = config?.allowUserProvider ? loadUserStorageProvider() : null;
-    if (!config || (config.mode !== "server_sqlite_s3" && (config.mode !== "hybrid" || !userProvider))) throw new Error("服务端对象存储未启用");
+    if (!config || (!canUseGlobalStorage(config) && !userProvider)) throw new Error("服务端对象存储未启用");
     const token = useUserStore.getState().token;
     if (!token) throw new Error("请先登录后再同步视频");
     const formData = new FormData();
@@ -72,7 +72,7 @@ async function uploadMediaBlobToServer(blob: Blob, filename: string): Promise<Up
 }
 
 async function loadStorageConfig() {
-    storageConfigPromise ||= apiGet<{ mode: string; allowUserProvider: boolean }>("/api/storage/config");
+    storageConfigPromise ||= apiGet<StorageConfig>("/api/storage/config");
     return storageConfigPromise;
 }
 

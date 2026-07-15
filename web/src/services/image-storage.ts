@@ -29,11 +29,26 @@ export type UserStorageProvider = {
     pathPrefix: string;
 };
 
+type UploadImageOptions = {
+    localOnly?: boolean;
+};
+
+export type StorageConfig = {
+    mode: string;
+    allowUserProvider: boolean;
+    allowUserGlobalProvider: boolean;
+};
+
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "image_files" });
 const objectUrls = new Map<string, string>();
 const serverUrls = new Map<string, string>();
 export const USER_STORAGE_PROVIDER_KEY = "infinite-canvas:user_storage_provider";
-let storageConfigPromise: Promise<{ mode: string; allowUserProvider: boolean }> | null = null;
+let storageConfigPromise: Promise<StorageConfig> | null = null;
+
+export function canUseGlobalStorage(config: StorageConfig) {
+    const user = useUserStore.getState().user;
+    return config.mode === "server_sqlite_s3" && Boolean(user && user.role !== "guest" && (user.role === "admin" || config.allowUserGlobalProvider));
+}
 
 function getProxyUrl(url: string): string {
     if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -45,7 +60,7 @@ function getProxyUrl(url: string): string {
     return url;
 }
 
-export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
+export async function uploadImage(input: string | Blob, options: UploadImageOptions = {}): Promise<UploadedImage> {
     const url = typeof input === "string" ? getProxyUrl(input) : input;
     let blob: Blob;
     if (typeof url === "string") {
@@ -63,8 +78,10 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
     } else {
         blob = url;
     }
-    const serverUpload = await maybeUploadImageToServer(blob);
-    if (serverUpload) return serverUpload;
+    if (!options.localOnly) {
+        const serverUpload = await maybeUploadImageToServer(blob);
+        if (serverUpload) return serverUpload;
+    }
     const storageKey = `image:${nanoid()}`;
     await store.setItem(storageKey, blob);
     const urlObj = URL.createObjectURL(blob);
@@ -82,7 +99,7 @@ export async function uploadRemoteImageToServer(url: string, filename: string): 
     const blob = await response.blob();
     const config = await loadStorageConfig();
     const userProvider = config.allowUserProvider ? loadUserStorageProvider() : null;
-    if (config.mode !== "server_sqlite_s3" && (config.mode !== "hybrid" || !userProvider)) throw new Error("服务端对象存储未启用");
+    if (!canUseGlobalStorage(config) && !userProvider) throw new Error("服务端对象存储未启用");
     const token = useUserStore.getState().token;
     if (!token) throw new Error("服务端存储需要先登录");
     const formData = new FormData();
@@ -133,11 +150,12 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
 async function maybeUploadImageToServer(blob: Blob): Promise<UploadedImage | null> {
     const config = await loadStorageConfig().catch(() => null);
     const userProvider = config?.allowUserProvider ? loadUserStorageProvider() : null;
-    const useServerStorage = config && (config.mode === "server_sqlite_s3" || (config.mode === "hybrid" && userProvider));
+    const canUseGlobalProvider = config ? canUseGlobalStorage(config) : false;
+    const useServerStorage = canUseGlobalProvider || Boolean(userProvider);
     if (!config || !useServerStorage) return null;
     const token = useUserStore.getState().token;
     if (!token) {
-        if (config.mode === "server_sqlite_s3") throw new Error("服务端存储需要先登录");
+        if (canUseGlobalProvider) throw new Error("服务端存储需要先登录");
         return null;
     }
     const formData = new FormData();
@@ -146,7 +164,7 @@ async function maybeUploadImageToServer(blob: Blob): Promise<UploadedImage | nul
     const response = await fetch("/api/v1/files", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: formData });
     const payload = (await response.json().catch(() => null)) as { code?: number; msg?: string; data?: UploadedImage } | null;
     if (!response.ok || payload?.code !== 0 || !payload.data) {
-        if (config.mode === "hybrid") return null;
+        if (!canUseGlobalProvider) return null;
         throw new Error(payload?.msg || "服务端图片上传失败");
     }
     const meta = await readImageMeta(payload.data.url);
@@ -155,7 +173,7 @@ async function maybeUploadImageToServer(blob: Blob): Promise<UploadedImage | nul
 }
 
 export async function loadStorageConfig() {
-    storageConfigPromise ||= apiGet<{ mode: string; allowUserProvider: boolean }>("/api/storage/config");
+    storageConfigPromise ||= apiGet<StorageConfig>("/api/storage/config");
     return storageConfigPromise;
 }
 

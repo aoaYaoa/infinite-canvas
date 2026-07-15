@@ -40,7 +40,7 @@ export type ImageQuickToolsConfig = {
 
 export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v6";
 
-const defaultBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download", "edit"];
+const defaultBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download"];
 
 export const imageToolDefinitions: ImageToolDefinition[] = [
     {
@@ -85,7 +85,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         defaultVisible: true,
         panelLabel: "局部编辑",
         label: "局部编辑",
-        title: "添加蒙版遮罩后局部修改",
+        title: "对图片进行局部修改",
         icon: () => <Brush className="size-4" />,
         run: (node, handlers) => handlers.onMaskEdit(node),
     },
@@ -136,7 +136,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
     },
     {
         id: "view",
-        defaultVisible: true,
+        defaultVisible: false,
         panelLabel: "查看大图",
         label: "查看大图",
         title: "查看图片详情",

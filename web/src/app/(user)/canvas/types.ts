@@ -11,15 +11,25 @@ export type ViewportTransform = {
 
 export enum CanvasNodeType {
     Image = "image",
+    Panorama = "panorama",
     Text = "text",
     Config = "config",
     Video = "video",
     Audio = "audio",
+    Director = "director",
 }
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
+
+export type CameraControlOptions = {
+    enabled: boolean;
+    camera: string;
+    lens: string;
+    focalLength: number;
+    aperture: number;
+};
 
 export type CanvasNodeMetadata = {
     content?: string;
@@ -75,6 +85,24 @@ export type CanvasNodeMetadata = {
     klingImageNodeIds?: string[];
     klingMultiPrompt?: { textNodeId?: string; duration?: string }[];
     klingElementList?: { name?: string; description?: string; nodeIds?: string[] }[];
+    cameraControl?: CameraControlOptions;
+    panoramaSourcePrompt?: string;
+    panoramaFinalPrompt?: string;
+    panoramaProjection?: "equirectangular";
+    directorProject?: unknown;
+};
+
+export type CanvasDirectorPanorama = {
+    edgeId: string;
+    sourceNodeId: string;
+    imageUrl: string;
+    fileName: string;
+    projectionMode: "equirectangular" | "backdrop";
+};
+
+export type CanvasDirectorCapture = {
+    dataUrl: string;
+    fileName: string;
 };
 
 export type CanvasNodeData = {

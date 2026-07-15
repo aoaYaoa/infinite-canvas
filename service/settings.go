@@ -758,6 +758,7 @@ func findSavedStorageProvider(provider model.StorageProvider, saved []model.Stor
 func normalizePrivateStorageSetting(setting model.PrivateStorageSetting) model.PrivateStorageSetting {
 	if setting.Mode == "" {
 		setting.Mode = "local_indexeddb"
+		setting.AllowUserGlobalProvider = true
 	}
 	if setting.CapacityLimitBytes <= 0 {
 		setting.CapacityLimitBytes = 9 * 1024 * 1024 * 1024

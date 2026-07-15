@@ -69,6 +69,14 @@ func HasAdminStorageProvider(storage model.PrivateStorageSetting) bool {
 	return false
 }
 
+func canUseGlobalStorage(ctx context.Context, storage model.PrivateStorageSetting) bool {
+	user, ok := UserFromContext(ctx)
+	if !ok || user.ID == "" || user.Role == model.UserRoleGuest {
+		return false
+	}
+	return user.Role == model.UserRoleAdmin || storage.AllowUserGlobalProvider
+}
+
 // HasActiveCloudStorage 判断当前请求是否有可用的云存储。
 func HasActiveCloudStorage(ctx context.Context) (bool, error) {
 	settings, err := repository.GetSettings()
@@ -77,7 +85,7 @@ func HasActiveCloudStorage(ctx context.Context) (bool, error) {
 	}
 	settings = normalizeSettings(settings)
 	storage := normalizePrivateStorageSetting(settings.Private.Storage)
-	if HasAdminStorageProvider(storage) {
+	if canUseGlobalStorage(ctx, storage) && HasAdminStorageProvider(storage) {
 		return true, nil
 	}
 	if storage.AllowUserProvider {
@@ -117,7 +125,7 @@ func PublicStorageConfig() (model.PublicStorageSetting, error) {
 		mode = "hybrid"
 	}
 
-	return model.PublicStorageSetting{Mode: mode, AllowUserProvider: storage.AllowUserProvider}, nil
+	return model.PublicStorageSetting{Mode: mode, AllowUserProvider: storage.AllowUserProvider, AllowUserGlobalProvider: storage.AllowUserGlobalProvider}, nil
 }
 
 // StorageObjectInfo 获取存储对象元数据。
@@ -174,6 +182,9 @@ func UploadStorageObjectWithProvider(ctx context.Context, filename string, conte
 			return UploadedStorageObject{}, errors.New("用户对象存储配置不完整")
 		}
 	} else {
+		if !canUseGlobalStorage(ctx, storage) {
+			return UploadedStorageObject{}, errors.New("服务端对象存储未启用")
+		}
 		provider, err = selectStorageProvider(storage)
 		if err != nil {
 			return UploadedStorageObject{}, errors.New("服务端对象存储未启用")
