@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import dynamic from "next/dynamic";
 import { ChevronRight, Image as ImageIcon, Music2, RefreshCw, Star, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -14,6 +15,7 @@ import type { CanvasResourceReference } from "../utils/canvas-resource-reference
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const selectionBlue = "#2f80ff";
+const CanvasPanoramaViewer = dynamic(() => import("./canvas-panorama-viewer"), { ssr: false, loading: () => null });
 
 type CanvasNodeProps = {
     data: CanvasNodeData;
@@ -69,8 +71,10 @@ type NodeContentRendererProps = {
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
+    onViewImage?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
+    onMoveStart?: (event: React.MouseEvent<HTMLButtonElement>) => void;
 };
 
 export const CanvasNode = React.memo(function CanvasNode({
@@ -385,8 +389,10 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onStopEditing={() => setIsEditingContent(false)}
                         onRetry={onRetry}
                         onGenerateImage={onGenerateImage}
+                        onViewImage={onViewImage}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
                         onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
+                        onMoveStart={(event) => onMouseDown(event, data.id)}
                     />
                 </div>
 
@@ -411,7 +417,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 
 function NodeContent(props: NodeContentRendererProps) {
     if ((props.node.type === CanvasNodeType.Config || props.node.type === CanvasNodeType.Director) && props.renderNodeContent) return props.renderNodeContent(props.node);
-    if (props.isBatchRoot) return <ImageNodeContent {...props} />;
+    if (props.isBatchRoot) return props.node.type === CanvasNodeType.Panorama ? <PanoramaNodeContent {...props} /> : <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} now={props.now} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
@@ -422,7 +428,7 @@ function NodeContent(props: NodeContentRendererProps) {
 const nodeContentRenderers = {
     [CanvasNodeType.Text]: TextContent,
     [CanvasNodeType.Image]: ImageNodeContent,
-    [CanvasNodeType.Panorama]: ImageNodeContent,
+    [CanvasNodeType.Panorama]: PanoramaNodeContent,
     [CanvasNodeType.Config]: EmptyImageContent,
     [CanvasNodeType.Video]: VideoNodeContent,
     [CanvasNodeType.Audio]: AudioNodeContent,
@@ -604,6 +610,25 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     );
 }
 
+function PanoramaNodeContent(props: NodeContentRendererProps) {
+    const src = props.node.metadata?.content;
+    if (!src) return <ImageNodeContent {...props} />;
+
+    return (
+        <ImageContent
+            node={props.node}
+            isBatchRoot={props.isBatchRoot}
+            batchCount={props.batchCount}
+            batchExpanded={props.batchExpanded}
+            batchOpening={props.batchOpening}
+            batchRecovering={props.batchRecovering}
+            onToggleBatch={props.onToggleBatch}
+            onSetBatchPrimary={props.onSetBatchPrimary}
+            media={<CanvasPanoramaViewer src={src} alt={props.node.title} expandOnDoubleClick={!props.isBatchRoot} onMoveStart={props.onMoveStart} onOpen={props.onViewImage ? () => props.onViewImage?.(props.node) : undefined} />}
+        />
+    );
+}
+
 function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch }: NodeContentRendererProps) {
     const content = (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
@@ -661,6 +686,7 @@ function ImageContent({
     batchRecovering,
     onToggleBatch,
     onSetBatchPrimary,
+    media,
 }: {
     node: CanvasNodeData;
     isBatchRoot: boolean;
@@ -670,6 +696,7 @@ function ImageContent({
     batchRecovering: boolean;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
+    media?: ReactNode;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isBatchChild = Boolean(node.metadata?.batchRootId);
@@ -677,13 +704,15 @@ function ImageContent({
     return (
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
             <div className="h-full w-full overflow-hidden rounded-3xl">
-                <img
-                    src={node.metadata!.content!}
-                    alt={node.title}
-                    draggable={false}
-                    onDragStart={(event) => event.preventDefault()}
-                    className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
-                />
+                {media ?? (
+                    <img
+                        src={node.metadata!.content!}
+                        alt={node.title}
+                        draggable={false}
+                        onDragStart={(event) => event.preventDefault()}
+                        className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
+                    />
+                )}
             </div>
             {isBatchRoot ? (
                 <button

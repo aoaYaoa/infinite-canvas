@@ -160,7 +160,7 @@ func ProxyImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 5 * time.Minute,
 	}
 	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
 	if err != nil {
@@ -175,7 +175,7 @@ func ProxyImage(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		FailError(w, err)
+		FailWithStatus(w, http.StatusBadGateway, "代理图片请求失败")
 		return
 	}
 	defer resp.Body.Close()
@@ -184,6 +184,15 @@ func ProxyImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	contentType := resp.Header.Get("Content-Type")
+	isImage := strings.HasPrefix(contentType, "image/")
+	var data []byte
+	if isImage {
+		data, err = io.ReadAll(resp.Body)
+		if err != nil {
+			FailWithStatus(w, http.StatusBadGateway, "代理图片请求失败")
+			return
+		}
+	}
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	} else {
@@ -191,5 +200,9 @@ func ProxyImage(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.WriteHeader(resp.StatusCode)
+	if isImage {
+		_, _ = w.Write(data)
+		return
+	}
 	_, _ = io.Copy(w, resp.Body)
 }

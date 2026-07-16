@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Globe2, Home, ImageIcon, Images, Layers3, List, Menu, MessageSquare, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
@@ -68,6 +69,8 @@ import {
 } from "../types";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio } from "@/types/media";
+
+const CanvasPanoramaViewer = dynamic(() => import("../components/canvas-panorama-viewer"), { ssr: false, loading: () => null });
 
 type CanvasClipboard = {
     nodes: CanvasNodeData[];
@@ -3296,6 +3299,7 @@ function InfiniteCanvasPage() {
                         <FullscreenPreview
                             src={activeItemNode.metadata?.content || ""}
                             alt={activeItemNode.title || "图片"}
+                            isPanorama={activeItemNode.type === CanvasNodeType.Panorama}
                             onClose={() => setPreviewNodeId(null)}
                             hasPrev={currentIndex > 0}
                             hasNext={currentIndex < group.length - 1}
@@ -3343,7 +3347,7 @@ function InfiniteCanvasPage() {
     );
 }
 
-function FullscreenPreview({ src, alt, onClose, hasPrev, hasNext, onPrev, onNext }: { src: string; alt: string; onClose: () => void; hasPrev?: boolean; hasNext?: boolean; onPrev?: () => void; onNext?: () => void }) {
+function FullscreenPreview({ src, alt, isPanorama, onClose, hasPrev, hasNext, onPrev, onNext }: { src: string; alt: string; isPanorama?: boolean; onClose: () => void; hasPrev?: boolean; hasNext?: boolean; onPrev?: () => void; onNext?: () => void }) {
     const [zoom, setZoom] = useState<number>(1);
     const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
     const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -3390,7 +3394,7 @@ function FullscreenPreview({ src, alt, onClose, hasPrev, hasNext, onPrev, onNext
     };
 
     return (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={onClose}>
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/80 backdrop-blur-sm" data-canvas-no-zoom={isPanorama ? "" : undefined} onClick={onClose}>
             {hasPrev || hasNext ? (
                 <>
                     <button
@@ -3413,22 +3417,28 @@ function FullscreenPreview({ src, alt, onClose, hasPrev, hasNext, onPrev, onNext
                     </button>
                 </>
             ) : null}
-            <img
-                ref={imgRef}
-                src={src}
-                alt={alt}
-                draggable={false}
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                className={`max-h-[85vh] max-w-[85vw] object-contain rounded-2xl shadow-[0_24px_72px_rgba(0,0,0,0.4)] ${zoom > 1 ? "cursor-grab active:cursor-grabbing" : "cursor-default"}`}
-                onClick={(e) => e.stopPropagation()}
-                onDragStart={(e) => e.preventDefault()}
-                style={{
-                    transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
-                    transition: isDragging ? "none" : "transform 0.12s cubic-bezier(0.25, 0.46, 0.45, 0.94)",
-                }}
-            />
+            {isPanorama ? (
+                <div className="h-[85vh] w-[85vw] supports-[height:round(1px,1px)]:h-[round(85vh,1px)] supports-[height:round(1px,1px)]:w-[round(85vw,1px)] overflow-hidden rounded-2xl shadow-[0_24px_72px_rgba(0,0,0,0.4)]" onClick={(event) => event.stopPropagation()}>
+                    <CanvasPanoramaViewer src={src} alt={alt} immersive />
+                </div>
+            ) : (
+                <img
+                    ref={imgRef}
+                    src={src}
+                    alt={alt}
+                    draggable={false}
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    className={`max-h-[85vh] max-w-[85vw] object-contain rounded-2xl shadow-[0_24px_72px_rgba(0,0,0,0.4)] ${zoom > 1 ? "cursor-grab active:cursor-grabbing" : "cursor-default"}`}
+                    onClick={(e) => e.stopPropagation()}
+                    onDragStart={(e) => e.preventDefault()}
+                    style={{
+                        transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
+                        transition: isDragging ? "none" : "transform 0.12s cubic-bezier(0.25, 0.46, 0.45, 0.94)",
+                    }}
+                />
+            )}
         </div>
     );
 }

@@ -39,6 +39,7 @@ export type ImageQuickToolsConfig = {
 };
 
 export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v6";
+export const PANORAMA_QUICK_TOOLS_STORAGE_KEY = "canvas-panorama-quick-tools-v1";
 
 const defaultBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download"];
 
@@ -146,6 +147,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
 ];
 
 export const defaultImageQuickToolIds: ImageQuickToolId[] = [...defaultBaseToolIds, ...imageToolDefinitions.filter((tool) => tool.defaultVisible).map((tool) => tool.id)];
+export const defaultPanoramaQuickToolIds: ImageQuickToolId[] = defaultImageQuickToolIds.filter((id) => id !== "replace");
 
 export function buildImageToolbarTools(node: CanvasNodeData, handlers: ImageToolHandlers) {
     return imageToolDefinitions.map((tool) => ({

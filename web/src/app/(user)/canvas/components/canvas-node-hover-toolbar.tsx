@@ -11,7 +11,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasNodeData, type ViewportTransform } from "../types";
 import { isCanvasImageNodeType, isPanoramaNodeType } from "../utils/canvas-panorama";
 import { ImageToolSettingsModal, type ImageToolbarSettingsTool } from "./canvas-image-toolbar-settings-modal";
-import { IMAGE_QUICK_TOOLS_STORAGE_KEY, buildImageToolbarTools, defaultImageQuickToolIds, readImageQuickToolsConfig, type ImageQuickToolId } from "./canvas-image-toolbar-tools";
+import { IMAGE_QUICK_TOOLS_STORAGE_KEY, PANORAMA_QUICK_TOOLS_STORAGE_KEY, buildImageToolbarTools, defaultImageQuickToolIds, defaultPanoramaQuickToolIds, readImageQuickToolsConfig, type ImageQuickToolId } from "./canvas-image-toolbar-tools";
 
 type CanvasNodeHoverToolbarProps = {
     node: CanvasNodeData | null;
@@ -80,25 +80,40 @@ export function CanvasNodeHoverToolbar({
     onToggleFreeResize,
     onDelete,
 }: CanvasNodeHoverToolbarProps) {
-    const [quickImageToolIds, setQuickImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
-    const [showImageToolLabels, setShowImageToolLabels] = useState(true);
+    const [quickToolsConfigs, setQuickToolsConfigs] = useState(() => ({
+        [IMAGE_QUICK_TOOLS_STORAGE_KEY]: { ids: defaultImageQuickToolIds, showLabels: true },
+        [PANORAMA_QUICK_TOOLS_STORAGE_KEY]: { ids: defaultPanoramaQuickToolIds, showLabels: true },
+    }));
     const [draftImageToolIds, setDraftImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
     const [draftShowImageToolLabels, setDraftShowImageToolLabels] = useState(true);
     const [imageToolSettingsOpen, setImageToolSettingsOpen] = useState(false);
     const { message } = App.useApp();
     const copyText = useCopyText();
+    const isPanorama = isPanoramaNodeType(node?.type);
+    const quickToolsStorageKey = isPanorama ? PANORAMA_QUICK_TOOLS_STORAGE_KEY : IMAGE_QUICK_TOOLS_STORAGE_KEY;
+    const { ids: quickImageToolIds, showLabels: showImageToolLabels } = quickToolsConfigs[quickToolsStorageKey];
 
     useEffect(() => {
-        try {
-            const stored = window.localStorage.getItem(IMAGE_QUICK_TOOLS_STORAGE_KEY);
-            if (!stored) return;
-            const parsed = JSON.parse(stored) as unknown;
-            const config = readImageQuickToolsConfig(parsed);
-            setQuickImageToolIds(config.ids);
-            setShowImageToolLabels(config.showLabels);
-        } catch {
-            window.localStorage.removeItem(IMAGE_QUICK_TOOLS_STORAGE_KEY);
-        }
+        const readQuickToolsConfig = (storageKey: string, defaultIds: ImageQuickToolId[]) => {
+            try {
+                const stored = window.localStorage.getItem(storageKey);
+                if (stored === null) return { ids: defaultIds, showLabels: true };
+                const config = readImageQuickToolsConfig(JSON.parse(stored) as unknown);
+                return storageKey === PANORAMA_QUICK_TOOLS_STORAGE_KEY ? { ...config, ids: config.ids.filter((id) => id !== "replace") } : config;
+            } catch {
+                try {
+                    window.localStorage.removeItem(storageKey);
+                } catch {
+                    // Ignore unavailable storage and use defaults.
+                }
+                return { ids: defaultIds, showLabels: true };
+            }
+        };
+
+        setQuickToolsConfigs({
+            [IMAGE_QUICK_TOOLS_STORAGE_KEY]: readQuickToolsConfig(IMAGE_QUICK_TOOLS_STORAGE_KEY, defaultImageQuickToolIds),
+            [PANORAMA_QUICK_TOOLS_STORAGE_KEY]: readQuickToolsConfig(PANORAMA_QUICK_TOOLS_STORAGE_KEY, defaultPanoramaQuickToolIds),
+        });
     }, []);
 
     useEffect(() => {
@@ -128,7 +143,7 @@ export function CanvasNodeHoverToolbar({
         }
         copyText(prompt, "提示词已复制");
     };
-    const imageTools = buildImageToolbarTools(node, { onUpload, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt });
+    const imageTools = buildImageToolbarTools(node, { onUpload, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt }).filter((tool) => !isPanorama || tool.id !== "replace");
 
     function openImageToolSettings() {
         onKeep(node.id);
@@ -153,7 +168,7 @@ export function CanvasNodeHoverToolbar({
         ...(isConfig ? [{ id: "config", title: "生成配置", label: "生成配置", icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "decreaseFont", title: "减小字号", label: "缩小", icon: <Minus className="size-4" />, onClick: () => onDecreaseFont(node) }] : []),
         ...(isText ? [{ id: "increaseFont", title: "增大字号", label: "放大", icon: <Plus className="size-4" />, onClick: () => onIncreaseFont(node) }] : []),
-        ...(isImage && !hasImage ? [{ id: "uploadImage", title: "上传图片", label: "上传图片", icon: <Upload className="size-4" />, onClick: () => onUpload(node) }] : []),
+        ...(isImage && !isPanorama && !hasImage ? [{ id: "uploadImage", title: "上传图片", label: "上传图片", icon: <Upload className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(isVideo ? [{ id: "uploadVideo", title: hasVideo ? "替换视频" : "上传视频", label: hasVideo ? "替换视频" : "上传视频", icon: <Video className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(isAudio ? [{ id: "uploadAudio", title: hasAudio ? "替换音频" : "上传音频", label: hasAudio ? "替换音频" : "上传音频", icon: <Music2 className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(hasImage ? imageTools.map((tool) => ({ id: tool.id, title: tool.title, label: tool.label, icon: tool.icon, active: tool.active, onClick: tool.onClick })) : []),
@@ -176,10 +191,17 @@ export function CanvasNodeHoverToolbar({
     };
 
     const saveImageToolSettings = () => {
-        const config = { ids: draftImageToolIds, showLabels: draftShowImageToolLabels };
-        setQuickImageToolIds(config.ids);
-        setShowImageToolLabels(config.showLabels);
-        window.localStorage.setItem(IMAGE_QUICK_TOOLS_STORAGE_KEY, JSON.stringify(config));
+        const config = {
+            ids: isPanorama ? draftImageToolIds.filter((id) => id !== "replace") : draftImageToolIds,
+            showLabels: draftShowImageToolLabels,
+        };
+        try {
+            window.localStorage.setItem(quickToolsStorageKey, JSON.stringify(config));
+        } catch {
+            message.error("快捷工具配置保存失败");
+            return;
+        }
+        setQuickToolsConfigs((current) => ({ ...current, [quickToolsStorageKey]: config }));
         closeImageToolSettings();
     };
 

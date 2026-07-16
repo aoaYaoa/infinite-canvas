@@ -1,5 +1,5 @@
 # 构建 Next.js 前端产物。
-FROM oven/bun:1.3.13 AS web-build
+FROM oven/bun:1.3.14 AS web-build
 
 WORKDIR /app/web
 COPY web/package.json web/bun.lock ./
