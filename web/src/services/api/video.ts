@@ -227,7 +227,7 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
     }
     if (motionControl) body.append("character_orientation", normalizeCharacterOrientation(config.videoCharacterOrientation));
     if (supportsVideoAudioGeneration(model)) body.append("video_generate_audio", String(boolConfig(config.videoGenerateAudio, false)));
-    const files = await Promise.all(input.references.slice(0, kling ? 2 : 7).map(imageReferenceToFormValue));
+    const files = await Promise.all(input.references.slice(0, kling ? 2 : 9).map(imageReferenceToFormValue));
     files.forEach((file) => body.append("input_reference[]", file));
     if (!kling && input.firstFrame) body.append("first_frame_url", await imageReferenceToFormValue(input.firstFrame));
     if (!kling && input.lastFrame) body.append("last_frame_url", await imageReferenceToFormValue(input.lastFrame));

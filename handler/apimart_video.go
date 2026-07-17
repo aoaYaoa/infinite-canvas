@@ -864,10 +864,6 @@ func setAPIMartImageReference(payload map[string]any, config apimartInputConfig,
 		setAPIMartHappyHorseImageReference(payload, values)
 		return
 	}
-	if config.imageRefKind == "seedance2" && shouldUseAPIMartImageRoles(sourceKey, values) {
-		payload["image_with_roles"] = buildAPIMartImageRoles(values)
-		return
-	}
 	if config.imageRefKind == "roles" {
 		payload["image_with_roles"] = buildAPIMartImageRoles(values)
 		return
@@ -961,10 +957,6 @@ func setAPIMartHappyHorseImageReference(payload map[string]any, values []string)
 		return
 	}
 	payload["image_urls"] = values
-}
-
-func shouldUseAPIMartImageRoles(sourceKey string, values []string) bool {
-	return isAPIMartFirstLastSource(sourceKey) || len(values) == 2
 }
 
 func isAPIMartFirstLastSource(sourceKey string) bool {

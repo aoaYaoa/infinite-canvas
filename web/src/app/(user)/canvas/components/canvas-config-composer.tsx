@@ -86,18 +86,20 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
         if (!editor) return;
         removeActiveMention();
         const chip = createReferenceChip(input, inputs, theme, setImagePreview);
+        const beforeSpace = document.createTextNode(" ");
         const space = document.createTextNode(" ");
         const selection = window.getSelection();
         const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
         if (range) {
             range.insertNode(space);
             range.insertNode(chip);
+            range.insertNode(beforeSpace);
             range.setStartAfter(space);
             range.collapse(true);
             selection?.removeAllRanges();
             selection?.addRange(range);
         } else {
-            editor.append(chip, space);
+            editor.append(beforeSpace, chip, space);
             placeCaretAtEnd(editor);
         }
         closeMention();
