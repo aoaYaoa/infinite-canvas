@@ -492,7 +492,7 @@ async function writeLocalAICallLog(config: AiConfig, endpoint: string, startedAt
             responseBody,
             error,
         }),
-    }).catch(() => {});
+    }).catch(() => { });
 }
 
 function stringifyLogPayload(value: unknown) {
@@ -562,7 +562,7 @@ async function requestImageGenerationSingle(config: AiConfig & { seedIndex?: num
             model: config.model,
             prompt: withPromptGuard(config, withSystemPrompt(config, prompt)),
         };
-        if (params.size) body.size = params.size;
+        applyAgnesImageSize(body, config, params);
 
         return requestAndParseImages(
             config,
@@ -855,7 +855,7 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
             prompt: withPromptGuard(config, withSystemPrompt(config, prompt)),
             extra_body: { image: imageUrls },
         };
-        if (params.size) body.size = params.size;
+        applyAgnesImageSize(body, config, params);
         return {
             method: "POST",
             headers: jsonHeaders,
@@ -905,7 +905,7 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
             model: config.model,
             prompt: withPromptGuard(config, withSystemPrompt(config, prompt)),
         };
-        if (params.size) body.size = params.size;
+        applyAgnesImageSize(body, config, params);
         return {
             method: "POST",
             headers: jsonHeaders,
@@ -1014,6 +1014,41 @@ function isAgnesImageModel(model: string) {
     const m = model.toLowerCase().replace(/[\s_]+/g, "-");
     return m.startsWith("agnes-image") || m.startsWith("agens-image");
 }
+
+function isAgnesImage21Model(model: string) {
+    return model.toLowerCase().replace(/[\s_]+/g, "-") === "agnes-image-2.1-flash";
+}
+
+function normalizeAgnesImage21Ratio(value: string) {
+    const ratio = value.trim().toLowerCase();
+    if (["1:1", "3:4", "4:3", "16:9", "9:16", "2:3", "3:2", "21:9"].includes(ratio)) {
+        return ratio;
+    }
+    if (ratio === "2048x2048") return "1:1";
+    if (ratio === "2048x1152" || ratio === "3840x2160") return "16:9";
+    if (ratio === "1152x2048" || ratio === "2160x3840") return "9:16";
+    if (ratio === "3136x1344" || ratio === "6272x2688") return "21:9";
+    return "1:1";
+}
+
+function applyAgnesImageSize(
+    body: Record<string, unknown>,
+    config: AiConfig,
+    params: ImageRequestParams,
+) {
+    if (!isAgnesImage21Model(config.model)) {
+        if (params.size) body.size = params.size;
+        return;
+    }
+    body.size = ({
+        auto: "1K",
+        low: "2K",
+        medium: "3K",
+        high: "4K",
+    } as Record<string, string>)[params.quality] || "1K";
+    body.ratio = normalizeAgnesImage21Ratio(config.size);
+}
+
 function publicHttpUrl(value?: string) {
     if (!value || value.startsWith("blob:") || value.startsWith("data:")) return "";
     try {
@@ -1048,8 +1083,7 @@ async function requestAgnesImageEdit(config: AiConfig & { seedIndex?: number; se
             image: imageUrls, // 👈 核心对齐：官方文档参考图参数 extra_body.image 数组
         },
     };
-    if (params.size) body.size = params.size; // 👈 官方支持参数
-    // Agnes 图生图只发送官方支持的核心参数，避免冗余参数引发 400 阻断
+    applyAgnesImageSize(body, config, params);
 
     return requestAndParseImages(
         config,

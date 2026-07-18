@@ -117,7 +117,7 @@ export async function pollCreatedVideoGenerationTask(config: AiConfig, task: Vid
     let completed: VideoResponse | null = null;
     try {
         if (initialDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, initialDelayMs));
-        for (;;) {
+        for (; ;) {
             const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiVideoPollUrl(config, model, pollId), { headers: aiHeaders(config), params: usesAccountProxy(config) ? { model } : undefined })).data);
             onPoll?.(video);
             if (isFailedVideoStatus(video.status)) throw new VideoRequestError(video.error?.message || "视频生成失败", video);
@@ -181,7 +181,7 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
             body.height = dimensions.height;
         }
         if (inputReferences.length === 1) body.image = inputReferences[0];
-        if (inputReferences.length > 1) body.extra_body = { image: inputReferences };
+        if (inputReferences.length > 1) body.extra_body = { image: inputReferences, mode: "keyframes" };
         return body;
     }
 
@@ -535,7 +535,7 @@ async function writeVideoAICallLog(config: AiConfig, model: string, endpoint: st
             responseBody,
             error,
         }),
-    }).catch(() => {});
+    }).catch(() => { });
 }
 
 function summarizeVideoRequestBody(value: unknown) {
@@ -664,7 +664,7 @@ function firstVideoUrl(value: unknown, depth = 0): string {
     const record = value as Record<string, unknown>;
     const direct = firstString(record.video_url, record.videoUrl, record.url, record.remixed_from_video_id, record.output_url, record.download_url, record.file_url);
     if (/^https?:\/\//.test(direct)) return direct;
-    for (const key of ["video", "data", "output", "result", "content"]) {
+    for (const key of ["video", "data", "output", "result", "content", "metadata"]) {
         const found = firstVideoUrl(record[key], depth + 1);
         if (found) return found;
     }

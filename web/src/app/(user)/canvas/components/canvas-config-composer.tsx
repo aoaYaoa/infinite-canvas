@@ -72,6 +72,15 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
             closeMention();
             return;
         }
+        const selection = window.getSelection();
+        const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+        const container = editorRef.current?.parentElement;
+        const containerRect = container?.getBoundingClientRect();
+        const caretRect = range?.getBoundingClientRect();
+        if (container && containerRect && caretRect) {
+            container.style.setProperty("--mention-left", `${caretRect.left - containerRect.left}px`);
+            container.style.setProperty("--mention-top", `${caretRect.bottom - containerRect.top + 6}px`);
+        }
         setMention({ query: match[1] || "" });
         setActiveIndex(0);
     };
@@ -130,7 +139,7 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                     ref={editorRef}
                     contentEditable
                     suppressContentEditableWarning
-                    className="thin-scrollbar min-h-28 w-full overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-sm leading-7 outline-none"
+                    className="thin-scrollbar h-64 w-full overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-sm leading-7 outline-none"
                     style={{ color: theme.node.text }}
                     onInput={() => {
                         if (!composingRef.current) syncFromEditor();
@@ -192,7 +201,7 @@ function MentionMenu({ inputs, allInputs, activeIndex, theme, onSelect }: { inpu
     };
 
     return (
-        <div className="absolute left-2 top-[calc(100%+6px)] z-[90] max-h-56 w-64 overflow-y-auto rounded-xl border p-1 shadow-2xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
+        <div className="absolute z-[90] max-h-56 w-64 overflow-y-auto rounded-xl border p-1 shadow-2xl" style={{ left: "var(--mention-left)", top: "var(--mention-top)", background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
             {inputs.map((input, index) => (
                 <button
                     key={input.nodeId}
