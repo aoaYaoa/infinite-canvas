@@ -5,7 +5,6 @@ import type { UserStorageProvider } from "@/services/image-storage";
 export type UserConfigPayload = {
     modelConfig?: Partial<AiConfig>;
     storageProvider?: Partial<UserStorageProvider>;
-    canvasData?: unknown;
     imageHistory?: unknown;
     assetData?: unknown;
     syncCapabilities?: {
@@ -37,14 +36,6 @@ export async function syncUserStorageProvider(token: string, provider: UserStora
 
 export async function measureUserStorageProvider(token: string, provider: UserStorageProvider) {
     return apiPost<StorageCapacityResult>("/api/v1/storage/measure", { provider: toStorageProviderPayload(provider) }, token);
-}
-
-export async function fetchUserCanvasData<T>(token: string) {
-    return apiGet<T>("/api/v1/user-data/canvas", undefined, token);
-}
-
-export async function syncUserCanvasData<T>(token: string, data: T) {
-    return apiPost<T>("/api/v1/user-data/canvas", { data }, token);
 }
 
 export async function fetchUserImageHistory<T>(token: string) {

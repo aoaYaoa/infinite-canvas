@@ -1,10 +1,10 @@
 import localforage from "localforage";
 import { uploadImage } from "./image-storage";
 import { uploadMediaBlob } from "./file-storage";
-import { useCanvasStore, mergeCanvasProjects } from "@/app/(user)/canvas/stores/use-canvas-store";
+import { useCanvasStore } from "@/app/(user)/canvas/stores/use-canvas-store";
 import { useAssetStore, mergeAssets } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
-import { fetchUserConfig, syncUserCanvasData, syncUserAssetData, syncUserImageHistory } from "./api/user-config";
+import { fetchUserConfig, syncUserAssetData, syncUserImageHistory } from "./api/user-config";
 import { saveVideoGenerationLogs } from "./api/generation-logs";
 
 export async function checkLocalAssetsExist(): Promise<boolean> {
@@ -41,9 +41,6 @@ export async function migrateLocalAssetsToCloud(
 
     // 先拉取云端已存的数据
     const userConfig = await fetchUserConfig(token).catch(() => null);
-    const remoteCanvas = userConfig?.canvasData as
-        | { projects?: any[] }
-        | undefined;
     const remoteAssets = userConfig?.assetData as { assets?: any[] } | undefined;
 
     const imageStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_files" });
@@ -139,10 +136,7 @@ export async function migrateLocalAssetsToCloud(
                 await replaceKeysInString(canvasStr);
             const nextCanvas = JSON.parse(replacedCanvasStr);
             const finalCanvas = {
-                projects: mergeCanvasProjects(
-                    remoteCanvas?.projects || [],
-                    nextCanvas.projects || [],
-                ),
+                projects: nextCanvas.projects || [],
             };
             await localforage
                 .createInstance({
@@ -157,7 +151,10 @@ export async function migrateLocalAssetsToCloud(
                     }),
                 );
             useCanvasStore.setState(finalCanvas);
-            await syncUserCanvasData(token, finalCanvas);
+            await useCanvasStore.getState().syncWithRemote(
+                token,
+                true,
+            );
         } catch (error) {
             console.error(
                 "Failed to migrate canvas projects",

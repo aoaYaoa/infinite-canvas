@@ -29,6 +29,7 @@ description: 当前后端主要数据表与字段说明
 - `image_generation_logs`
 - `canvas_image_tasks`
 - `canvas_audio_tasks`
+- `canvas_projects`
 
 后续新增表时再同步补充本文档，未实际使用的规划表不提前写入。
 
@@ -189,6 +190,8 @@ description: 当前后端主要数据表与字段说明
 | `started_at` | string | 开始时间 |
 | `completed_at` | string | 完成时间 |
 
+索引：`idx_canvas_image_tasks_user_source_node (user_id, source, source_id, node_id)`
+
 ### canvas_audio_tasks
 
 画布音频生成任务表。只用于画布节点生成恢复，不影响原 `/audio/speech` 接口。
@@ -214,17 +217,23 @@ description: 当前后端主要数据表与字段说明
 | `started_at` | string | 开始时间 |
 | `completed_at` | string | 完成时间 |
 
-### canvas_project_deletions
+索引：`idx_canvas_audio_tasks_user_source_node (user_id, source, source_id, node_id)`
 
-画布项目删除墓碑，仅用于阻止旧页面同步重新写回已删除项目。
+### canvas_projects
 
-| 字段 | 说明 |
-| --- | --- |
-| user_id | 所属用户，与 project_id 组成主键 |
-| project_id | 已删除画布项目 ID |
-| deleted_at | 软删除时间；启动时及每天定时清理超过 7 天的记录 |
+画布项目表。一条画布项目对应一行，完整项目 JSON 保存在 `project_data`，包含节点、连线、聊天会话、画布设置和视口；不拆节点表。
 
-索引：`idx_canvas_project_deletions_deleted_at`
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `user_id` | string | 所属用户，与 `id` 组成主键 |
+| `id` | string | 画布项目 ID |
+| `project_data` | text | 完整 `CanvasProject` JSON |
+| `created_at` | string | 项目创建时间 |
+| `updated_at` | string | 项目更新时间 |
+| `deleted_at` | string | 软删除时间，空字符串表示未删除；超过 7 天由启动时和每天定时任务物理清理 |
+
+索引：`idx_canvas_projects_user_deleted_updated (user_id, deleted_at, updated_at)`、`idx_canvas_projects_deleted_at (deleted_at)`
+
 
 ### settings
 

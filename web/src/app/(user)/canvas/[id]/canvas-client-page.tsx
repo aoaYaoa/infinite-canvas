@@ -2469,6 +2469,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages);
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+                    const imageSize = nodeSizeFromRatio(generationConfig.size, imageConfig.width, imageConfig.height) || imageConfig;
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
                     const gap = 96;
                     const rowGap = 36;
@@ -2484,10 +2485,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         title: effectivePrompt.slice(0, 32) || "Generated Image",
                         position: {
                             x: isEmptyImageNode ? parentPosition.x : parentPosition.x + parentConfig.width + gap,
-                            y: parentPosition.y + parentConfig.height / 2 - imageConfig.height / 2,
+                            y: parentPosition.y + parentConfig.height / 2 - imageSize.height / 2,
                         },
-                        width: isEmptyImageNode ? sourceNode?.width || imageConfig.width : imageConfig.width,
-                        height: isEmptyImageNode ? sourceNode?.height || imageConfig.height : imageConfig.height,
+                        width: isEmptyImageNode ? sourceNode?.width || imageSize.width : imageSize.width,
+                        height: isEmptyImageNode ? sourceNode?.height || imageSize.height : imageSize.height,
                         metadata: {
                             prompt: effectivePrompt,
                             cameraControl: sourceNode?.metadata?.cameraControl,
@@ -2508,11 +2509,11 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         type: CanvasNodeType.Image,
                         title: effectivePrompt.slice(0, 32) || "Generated Image",
                         position: {
-                            x: rootNode.position.x + rootNode.width + 120 + (index % 2) * (imageConfig.width + 36),
-                            y: rootNode.position.y + Math.floor(index / 2) * (imageConfig.height + rowGap),
+                            x: rootNode.position.x + rootNode.width + 120 + (index % 2) * (imageSize.width + 36),
+                            y: rootNode.position.y + Math.floor(index / 2) * (imageSize.height + rowGap),
                         },
-                        width: imageConfig.width,
-                        height: imageConfig.height,
+                        width: imageSize.width,
+                        height: imageSize.height,
                         metadata: { prompt: effectivePrompt, cameraControl: sourceNode?.metadata?.cameraControl, status: NODE_STATUS_LOADING, startedAt: generationStartedAt, progress: 0, imageTaskId: targetTaskIds[id], batchRootId: count > 1 ? rootId : undefined, ...generationMetadata },
                     }));
                     const batchConnections = [...(isEmptyImageNode ? [] : [{ id: nanoid(), fromNodeId: nodeId, toNodeId: rootId }]), ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: rootId, toNodeId: childId }))];
@@ -3888,8 +3889,9 @@ function applyCanvasImageTaskUpdate(nodes: CanvasNodeData[], nodeId: string, tas
         };
         if (!completed || !url) return { ...node, metadata };
         const isPanorama = isPanoramaNodeType(node.type);
-        const naturalWidth = task.width || fallbackSize.width || node.width;
-        const naturalHeight = task.height || fallbackSize.height || node.height;
+        const requestedSize = nodeSizeFromRatio(node.metadata?.size || "", fallbackSize.width, fallbackSize.height);
+        const naturalWidth = task.width || requestedSize?.width || fallbackSize.width || node.width;
+        const naturalHeight = task.height || requestedSize?.height || fallbackSize.height || node.height;
         const imageSize = isPanorama ? PANORAMA_NODE_SIZE : fitNodeSize(naturalWidth, naturalHeight, NODE_DEFAULT_SIZE[CanvasNodeType.Image].width, NODE_DEFAULT_SIZE[CanvasNodeType.Image].height);
         return {
             ...node,

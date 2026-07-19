@@ -37,12 +37,12 @@ export default function UserLayout({ children }: { children: ReactNode }) {
             const { useCanvasStore } = await import("@/app/(user)/canvas/stores/use-canvas-store");
             const canvasStore = useCanvasStore.getState();
             canvasStore.setSyncEnabled(syncEnabled);
-            if (syncCanvasAfterLogin && syncEnabled) {
-                void canvasStore.syncWithRemote(
-                    token,
-                    config.canvasData,
-                    true,
-                );
+            if (
+                syncCanvasAfterLogin &&
+                syncEnabled &&
+                canvasStore.hydrated
+            ) {
+                void canvasStore.syncWithRemote(token, true);
             }
             const { useAssetStore } = await import("@/stores/use-asset-store");
             void useAssetStore.getState().hydrateAccountAssets(token, syncEnabled);
