@@ -57,6 +57,25 @@ func SaveUserCanvasData(w http.ResponseWriter, r *http.Request) {
 	OK(w, json.RawMessage(data))
 }
 
+func DeleteUserCanvasProjects(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil ||
+		len(request.IDs) == 0 {
+		Fail(w, "画布项目参数无效")
+		return
+	}
+	if err := service.DeleteCurrentUserCanvasProjects(
+		r.Context(),
+		request.IDs,
+	); err != nil {
+		Fail(w, err.Error())
+		return
+	}
+	OK(w, map[string]bool{"deleted": true})
+}
+
 func UserImageHistory(w http.ResponseWriter, r *http.Request) {
 	data, err := service.CurrentUserImageHistory(r.Context())
 	if err != nil {

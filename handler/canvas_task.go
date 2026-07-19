@@ -151,6 +151,31 @@ func DeleteUserCanvasImageTask(w http.ResponseWriter, r *http.Request, id string
 	OK(w, map[string]any{"deleted": true})
 }
 
+func DeleteUserCanvasTasks(w http.ResponseWriter, r *http.Request) {
+	user, ok := service.UserFromContext(r.Context())
+	if !ok {
+		Fail(w, "未登录或权限不足")
+		return
+	}
+
+	var request struct {
+		SourceID string   `json:"source_id"`
+		NodeIDs  []string `json:"node_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil || strings.TrimSpace(request.SourceID) == "" {
+		Fail(w, "画布任务参数无效")
+		return
+	}
+
+	if err := service.DeleteUserCanvasTasks(user.ID, request.SourceID, request.NodeIDs); err != nil {
+		log.Printf("delete canvas tasks failed: user=%s source=%s err=%v", user.ID, request.SourceID, err)
+		Fail(w, "AI 接口请求失败")
+		return
+	}
+
+	OK(w, map[string]any{"deleted": true})
+}
+
 func CreateCanvasAudioTask(w http.ResponseWriter, r *http.Request) {
 	user, ok := service.UserFromContext(r.Context())
 	if !ok {

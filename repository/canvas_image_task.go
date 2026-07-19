@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/tigerowo/infinite-canvas/model"
+	"gorm.io/gorm"
 )
 
 func SaveCanvasImageTask(task model.CanvasImageTask) (model.CanvasImageTask, error) {
@@ -12,6 +13,18 @@ func SaveCanvasImageTask(task model.CanvasImageTask) (model.CanvasImageTask, err
 		return task, err
 	}
 	return task, db.Save(&task).Error
+}
+
+func UpdateCanvasImageTask(task model.CanvasImageTask) (model.CanvasImageTask, error) {
+	db, err := DB()
+	if err != nil {
+		return task, err
+	}
+
+	return task, db.Model(&model.CanvasImageTask{}).
+		Where("user_id = ? AND id = ?", task.UserID, task.ID).
+		Select("*").
+		Updates(&task).Error
 }
 
 func GetUserCanvasImageTask(userID string, id string) (model.CanvasImageTask, bool, error) {
@@ -53,7 +66,7 @@ func BatchUserCanvasImageTasks(userID string, ids []string) ([]model.CanvasImage
 	if err != nil {
 		return nil, err
 	}
-	keys := canvasImageTaskIdentityValues(ids...)
+	keys := uniqueTrimmedValues(ids...)
 	if len(keys) == 0 {
 		return []model.CanvasImageTask{}, nil
 	}
@@ -70,7 +83,36 @@ func DeleteUserCanvasImageTask(userID string, id string) error {
 	return db.Where("user_id = ? AND id = ?", userID, strings.TrimSpace(id)).Delete(&model.CanvasImageTask{}).Error
 }
 
-func canvasImageTaskIdentityValues(values ...string) []string {
+func DeleteUserCanvasTasks(userID string, sourceID string, nodeIDs []string) error {
+	db, err := DB()
+	if err != nil {
+		return err
+	}
+
+	nodeIDs = uniqueTrimmedValues(nodeIDs...)
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		deleteTasks := func(task any) error {
+			query := tx.Where(
+				"user_id = ? AND source = ? AND source_id = ?",
+				userID,
+				"canvas",
+				sourceID,
+			)
+			if len(nodeIDs) > 0 {
+				query = query.Where("node_id IN ?", nodeIDs)
+			}
+			return query.Delete(task).Error
+		}
+
+		if err := deleteTasks(&model.CanvasImageTask{}); err != nil {
+			return err
+		}
+		return deleteTasks(&model.CanvasAudioTask{})
+	})
+}
+
+func uniqueTrimmedValues(values ...string) []string {
 	result := make([]string, 0, len(values))
 	seen := map[string]bool{}
 	for _, value := range values {

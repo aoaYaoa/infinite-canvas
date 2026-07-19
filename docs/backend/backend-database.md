@@ -214,6 +214,18 @@ description: 当前后端主要数据表与字段说明
 | `started_at` | string | 开始时间 |
 | `completed_at` | string | 完成时间 |
 
+### canvas_project_deletions
+
+画布项目删除墓碑，仅用于阻止旧页面同步重新写回已删除项目。
+
+| 字段 | 说明 |
+| --- | --- |
+| user_id | 所属用户，与 project_id 组成主键 |
+| project_id | 已删除画布项目 ID |
+| deleted_at | 软删除时间；启动时及每天定时清理超过 7 天的记录 |
+
+索引：`idx_canvas_project_deletions_deleted_at`
+
 ### settings
 
 系统配置表，只保存两行数据：`public` 放前端可读取的公开配置，`private` 放仅后端和管理员可读取的私有配置，配置值都用 JSON。

@@ -10,6 +10,18 @@ func SaveCanvasAudioTask(task model.CanvasAudioTask) (model.CanvasAudioTask, err
 	return task, db.Save(&task).Error
 }
 
+func UpdateCanvasAudioTask(task model.CanvasAudioTask) (model.CanvasAudioTask, error) {
+	db, err := DB()
+	if err != nil {
+		return task, err
+	}
+
+	return task, db.Model(&model.CanvasAudioTask{}).
+		Where("user_id = ? AND id = ?", task.UserID, task.ID).
+		Select("*").
+		Updates(&task).Error
+}
+
 func GetUserCanvasAudioTask(userID string, id string) (model.CanvasAudioTask, bool, error) {
 	db, err := DB()
 	if err != nil {

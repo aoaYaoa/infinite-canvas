@@ -41,7 +41,9 @@ export async function migrateLocalAssetsToCloud(
 
     // 先拉取云端已存的数据
     const userConfig = await fetchUserConfig(token).catch(() => null);
-    const remoteCanvas = userConfig?.canvasData as { projects?: any[] } | undefined;
+    const remoteCanvas = userConfig?.canvasData as
+        | { projects?: any[] }
+        | undefined;
     const remoteAssets = userConfig?.assetData as { assets?: any[] } | undefined;
 
     const imageStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_files" });
@@ -130,21 +132,37 @@ export async function migrateLocalAssetsToCloud(
     const canvasProjects = useCanvasStore.getState().projects;
     if (canvasProjects.length > 0) {
         try {
-            const canvasStr = JSON.stringify({ projects: canvasProjects });
-            const replacedCanvasStr = await replaceKeysInString(canvasStr);
+            const canvasStr = JSON.stringify({
+                projects: canvasProjects,
+            });
+            const replacedCanvasStr =
+                await replaceKeysInString(canvasStr);
             const nextCanvas = JSON.parse(replacedCanvasStr);
-            // 与云端已存的项目执行智能合并，防止覆盖云端其它设备的数据
-            const mergedProjects = mergeCanvasProjects(remoteCanvas?.projects || [], nextCanvas.projects);
-            const finalCanvas = { projects: mergedProjects };
-            // Save locally
-            await localforage.createInstance({ name: "infinite-canvas", storeName: "app_state" })
-                .setItem("infinite-canvas:canvas_store", JSON.stringify({ state: finalCanvas, version: 0 }));
-            // Set in Zustand store
+            const finalCanvas = {
+                projects: mergeCanvasProjects(
+                    remoteCanvas?.projects || [],
+                    nextCanvas.projects || [],
+                ),
+            };
+            await localforage
+                .createInstance({
+                    name: "infinite-canvas",
+                    storeName: "app_state",
+                })
+                .setItem(
+                    "infinite-canvas:canvas_store",
+                    JSON.stringify({
+                        state: finalCanvas,
+                        version: 0,
+                    }),
+                );
             useCanvasStore.setState(finalCanvas);
-            // Sync to server
             await syncUserCanvasData(token, finalCanvas);
-        } catch (e) {
-            console.error("Failed to migrate canvas projects", e);
+        } catch (error) {
+            console.error(
+                "Failed to migrate canvas projects",
+                error,
+            );
         }
     }
 
@@ -184,7 +202,7 @@ export async function migrateLocalAssetsToCloud(
             const logsStr = JSON.stringify({ logs: localLogs, categories: localCategories });
             const replacedLogsStr = await replaceKeysInString(logsStr);
             const nextLogsData = JSON.parse(replacedLogsStr);
-            
+
             // Save locally
             await imageLogStore.clear();
             await Promise.all(

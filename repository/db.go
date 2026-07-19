@@ -9,12 +9,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tigerowo/infinite-canvas/config"
-	"github.com/tigerowo/infinite-canvas/model"
 	"github.com/glebarez/sqlite"
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/tigerowo/infinite-canvas/config"
+	"github.com/tigerowo/infinite-canvas/model"
 	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -79,6 +79,7 @@ func DB() (*gorm.DB, error) {
 			&model.ImageGenerationLog{},
 			&model.CanvasImageTask{},
 			&model.CanvasAudioTask{},
+			&model.CanvasProjectDeletion{},
 		)
 	})
 	return db, dbErr

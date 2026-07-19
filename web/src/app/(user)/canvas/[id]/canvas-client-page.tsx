@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Globe2, Home, ImageIcon, Images, Layers3, List, Menu, MessageSquare, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 
+import { deleteCanvasProjects, deleteCanvasTasks } from "@/services/api/canvas-tasks";
 import { createCanvasImageTask, pollCanvasImageTaskStatus, requestImageQuestion, type CanvasImageTask } from "@/services/api/image";
 import { createCanvasAudioTask, pollCanvasAudioTaskStatus, type CanvasAudioTask } from "@/services/api/audio";
 import { createVideoGenerationTask, pollVideoGenerationTaskStatus, VIDEO_POLL_INTERVAL_MS, type VideoResponse } from "@/services/api/video";
@@ -133,6 +134,7 @@ function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: C
 }
 
 export default function CanvasPage() {
+    const params = useParams<{ id: string }>();
     const [mounted, setMounted] = useState(false);
 
     useEffect(() => {
@@ -141,7 +143,7 @@ export default function CanvasPage() {
 
     if (!mounted) return <CanvasRefreshShell />;
 
-    return <InfiniteCanvasPage />;
+    return <InfiniteCanvasPage key={params.id} projectId={params.id} />;
 }
 
 function CanvasRefreshShell() {
@@ -272,11 +274,9 @@ function NodeCreateMenu({
     );
 }
 
-function InfiniteCanvasPage() {
+function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const { message } = App.useApp();
-    const params = useParams<{ id: string }>();
     const router = useRouter();
-    const projectId = params.id;
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const assetInsertPositionRef = useRef<Position | null>(null);
@@ -886,6 +886,13 @@ function InfiniteCanvasPage() {
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter],
     );
 
+    const deleteCanvasTaskRecords = useCallback(
+        (nodeIds?: string[]) => {
+            void deleteCanvasTasks(projectId, nodeIds).catch(() => undefined);
+        },
+        [projectId],
+    );
+
     const deleteNodes = useCallback(
         (ids: Set<string>) => {
             if (!ids.size) return;
@@ -899,6 +906,7 @@ function InfiniteCanvasPage() {
                     if (allChildrenDeleted) allIds.add(node.id);
                 }
             });
+            deleteCanvasTaskRecords([...allIds]);
             const removedNodes = nodesRef.current.filter((node) => allIds.has(node.id));
             const remainingNodes = nodesRef.current.filter((node) => !allIds.has(node.id));
             const removedKeys = collectImageStorageKeys(removedNodes);
@@ -942,7 +950,7 @@ function InfiniteCanvasPage() {
             setContextMenu((current) => (current?.type === "node" && allIds.has(current.nodeId) ? null : current));
             cleanupCanvasFiles({ projectId, nodes: nodesRef.current.filter((node) => !allIds.has(node.id)), chatSessions });
         },
-        [chatSessions, cleanupCanvasFiles, projectId],
+        [chatSessions, cleanupCanvasFiles, deleteCanvasTaskRecords, projectId],
     );
 
     const deleteConnection = useCallback((connectionId: string) => {
@@ -964,6 +972,7 @@ function InfiniteCanvasPage() {
     }, [cancelPendingConnectionCreate]);
 
     const clearCanvas = useCallback(() => {
+        deleteCanvasTaskRecords();
         setNodes([]);
         setConnections([]);
         setInfoNodeId(null);
@@ -975,7 +984,7 @@ function InfiniteCanvasPage() {
         deselectCanvas();
         setClearConfirmOpen(false);
         cleanupCanvasFiles({ projectId, nodes: [], chatSessions: [] });
-    }, [cleanupCanvasFiles, deselectCanvas, projectId]);
+    }, [cleanupCanvasFiles, deleteCanvasTaskRecords, deselectCanvas, projectId]);
 
     const duplicateNode = useCallback((nodeId: string) => {
         const source = nodesRef.current.find((node) => node.id === nodeId);
@@ -1132,10 +1141,12 @@ function InfiniteCanvasPage() {
     }, [createProject, router]);
 
     const deleteCurrentProject = useCallback(() => {
+        void deleteCanvasProjects([projectId]).catch(() => undefined);
+        deleteCanvasTaskRecords();
         deleteProjects([projectId]);
         cleanupAssetImages();
         router.push("/canvas");
-    }, [cleanupAssetImages, deleteProjects, projectId, router]);
+    }, [cleanupAssetImages, deleteCanvasTaskRecords, deleteProjects, projectId, router]);
 
     const handleCanvasMouseDown = useCallback(
         (event: ReactPointerEvent<HTMLDivElement>) => {

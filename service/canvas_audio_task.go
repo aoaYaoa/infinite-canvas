@@ -55,7 +55,7 @@ func GetUserCanvasAudioTask(userID string, id string) (model.CanvasAudioTask, bo
 
 func SaveCanvasAudioTask(task model.CanvasAudioTask) (model.CanvasAudioTask, error) {
 	task.UpdatedAt = now()
-	return repository.SaveCanvasAudioTask(task)
+	return repository.UpdateCanvasAudioTask(task)
 }
 
 func CanvasAudioTaskResponse(task model.CanvasAudioTask) map[string]any {

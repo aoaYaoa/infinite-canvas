@@ -2,11 +2,11 @@ package model
 
 type CanvasImageTask struct {
 	ID              string `json:"id" gorm:"primaryKey"`
-	UserID          string `json:"userId"`
+	UserID          string `json:"userId" gorm:"index:idx_canvas_image_tasks_user_source_node,priority:1"`
 	UserDisplayName string `json:"userDisplayName"`
-	Source          string `json:"source"`
-	SourceID        string `json:"sourceId"`
-	NodeID          string `json:"nodeId"`
+	Source          string `json:"source" gorm:"index:idx_canvas_image_tasks_user_source_node,priority:2"`
+	SourceID        string `json:"sourceId" gorm:"index:idx_canvas_image_tasks_user_source_node,priority:3"`
+	NodeID          string `json:"nodeId" gorm:"index:idx_canvas_image_tasks_user_source_node,priority:4"`
 	Model           string `json:"model"`
 	ChannelID       string `json:"channelId"`
 	UserChannelID   string `json:"userChannelId"`

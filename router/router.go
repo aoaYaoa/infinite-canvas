@@ -3,9 +3,9 @@ package router
 import (
 	"net/http"
 
+	"github.com/gin-gonic/gin"
 	"github.com/tigerowo/infinite-canvas/handler"
 	"github.com/tigerowo/infinite-canvas/middleware"
-	"github.com/gin-gonic/gin"
 )
 
 func New() *gin.Engine {
@@ -41,6 +41,7 @@ func New() *gin.Engine {
 	v1.POST("/responses", gin.WrapF(handler.AIResponses))
 	v1.POST("/chat/completions", gin.WrapF(handler.AIChatCompletions))
 	v1.POST("/audio/speech", gin.WrapF(handler.AIAudioSpeech))
+	v1.POST("/canvas/tasks/delete", gin.WrapF(handler.DeleteUserCanvasTasks))
 	v1.POST("/canvas/image-tasks", gin.WrapF(handler.CreateCanvasImageTask))
 	v1.GET("/canvas/image-tasks", gin.WrapF(handler.UserCanvasImageTasks))
 	v1.POST("/canvas/image-tasks/status", gin.WrapF(handler.BatchCanvasImageTasks))
@@ -83,6 +84,7 @@ func New() *gin.Engine {
 	v1.POST("/user-config/storage", gin.WrapF(handler.SaveUserStorageProvider))
 	v1.GET("/user-data/canvas", gin.WrapF(handler.UserCanvasData))
 	v1.POST("/user-data/canvas", gin.WrapF(handler.SaveUserCanvasData))
+	v1.POST("/canvas/projects/delete", gin.WrapF(handler.DeleteUserCanvasProjects))
 	v1.GET("/user-data/image-history", gin.WrapF(handler.UserImageHistory))
 	v1.POST("/user-data/image-history", gin.WrapF(handler.SaveUserImageHistory))
 	v1.GET("/generation-logs/videos", gin.WrapF(handler.UserVideoGenerationLogs))
@@ -144,4 +146,3 @@ func New() *gin.Engine {
 
 	return router
 }
-
