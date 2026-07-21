@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -156,6 +158,13 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		body, contentType, err = normalizeAPIMartImageBody(body, contentType, modelName, channel)
 		if err != nil {
 			log.Printf("AI proxy normalize APIMart image request failed: model=%s err=%v", modelName, err)
+			Fail(w, "AI 接口请求失败")
+			return
+		}
+	} else if isGrok2APIChannel(channel) && upstreamPath == "/images/edits" {
+		body, contentType, err = normalizeGrok2APIImageEditBody(body, contentType)
+		if err != nil {
+			log.Printf("AI proxy normalize Grok2API image edit request failed: model=%s err=%v", modelName, err)
 			Fail(w, "AI 接口请求失败")
 			return
 		}
@@ -443,6 +452,124 @@ func readMultipartModel(body []byte, contentType string) string {
 		return values[0]
 	}
 	return ""
+}
+
+func isGrok2APIChannel(channel model.ModelChannel) bool {
+	value := strings.ToLower(strings.Join([]string{
+		channel.Protocol,
+		channel.Name,
+		channel.BaseURL,
+		channel.Remark,
+	}, " "))
+	return strings.Contains(value, "grok2api") || strings.Contains(value, "grok.uonoe.com")
+}
+
+func normalizeGrok2APIImageEditBody(body []byte, contentType string) ([]byte, string, error) {
+	if !strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") {
+		return body, contentType, nil
+	}
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return body, contentType, err
+	}
+	form, err := multipart.NewReader(bytes.NewReader(body), params["boundary"]).ReadForm(64 << 20)
+	if err != nil {
+		return body, contentType, err
+	}
+	defer form.RemoveAll()
+
+	payload := map[string]any{}
+	copyGrok2APIStringField(payload, form, "model")
+	copyGrok2APIStringField(payload, form, "prompt")
+	copyGrok2APIStringField(payload, form, "size")
+	copyGrok2APIStringField(payload, form, "aspect_ratio")
+	copyGrok2APIStringField(payload, form, "resolution")
+	copyGrok2APIStringField(payload, form, "response_format")
+	copyGrok2APIIntField(payload, form, "n")
+	copyGrok2APIIntField(payload, form, "partial_images")
+	copyGrok2APIBoolField(payload, form, "stream")
+
+	images, err := grok2APIImageEditInputs(form)
+	if err != nil {
+		return body, contentType, err
+	}
+	if len(images) == 0 {
+		return body, contentType, fmt.Errorf("图片编辑缺少参考图片")
+	}
+	payload["images"] = images
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return body, contentType, err
+	}
+	return encoded, "application/json", nil
+}
+
+func copyGrok2APIStringField(payload map[string]any, form *multipart.Form, key string) {
+	if values := form.Value[key]; len(values) > 0 && strings.TrimSpace(values[0]) != "" {
+		payload[key] = values[0]
+	}
+}
+
+func copyGrok2APIIntField(payload map[string]any, form *multipart.Form, key string) {
+	if values := form.Value[key]; len(values) > 0 {
+		value, err := strconv.Atoi(strings.TrimSpace(values[0]))
+		if err == nil {
+			payload[key] = value
+		}
+	}
+}
+
+func copyGrok2APIBoolField(payload map[string]any, form *multipart.Form, key string) {
+	if values := form.Value[key]; len(values) > 0 {
+		value, err := strconv.ParseBool(strings.TrimSpace(values[0]))
+		if err == nil {
+			payload[key] = value
+		}
+	}
+}
+
+func grok2APIImageEditInputs(form *multipart.Form) ([]map[string]string, error) {
+	images := []map[string]string{}
+	for _, key := range []string{"image", "images"} {
+		for _, value := range form.Value[key] {
+			value = strings.TrimSpace(value)
+			if value != "" {
+				images = append(images, map[string]string{"url": value})
+			}
+		}
+		for _, header := range form.File[key] {
+			dataURL, err := grok2APIFormFileDataURL(header)
+			if err != nil {
+				return nil, err
+			}
+			images = append(images, map[string]string{"url": dataURL})
+		}
+	}
+	return images, nil
+}
+
+func grok2APIFormFileDataURL(header *multipart.FileHeader) (string, error) {
+	file, err := header.Open()
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, (32<<20)+1))
+	if err != nil {
+		return "", err
+	}
+	if len(raw) == 0 || len(raw) > 32<<20 {
+		return "", fmt.Errorf("参考图片为空或超过 32 MiB")
+	}
+	mimeType := strings.TrimSpace(strings.Split(header.Header.Get("Content-Type"), ";")[0])
+	if mimeType == "" || strings.EqualFold(mimeType, "application/octet-stream") {
+		mimeType = strings.Split(http.DetectContentType(raw), ";")[0]
+	}
+	if !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
+		return "", fmt.Errorf("参考文件不是图片")
+	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
 }
 
 func readAIRequestCount(body []byte, contentType string) int {
