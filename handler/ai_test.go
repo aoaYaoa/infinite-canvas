@@ -63,3 +63,17 @@ func TestNormalizeGrok2APIImageEditBodyConvertsMultipartToJSON(t *testing.T) {
 		t.Fatalf("canvas metadata leaked into upstream payload: %s", string(converted))
 	}
 }
+
+func TestImageURLFromAIResponseReadsImageEditSSE(t *testing.T) {
+	payload := []byte("event: image_edit.completed\n" +
+		"data: {\"type\":\"image_edit.completed\",\"b64_json\":\"iVBORw0KGgo=\",\"size\":\"1024x1024\"}\n\n" +
+		"data: [DONE]\n\n")
+
+	url, mimeType, size, err := imageURLFromAIResponse(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if url != "data:image/png;base64,iVBORw0KGgo=" || mimeType != "image/png" || size != 8 {
+		t.Fatalf("url=%q mime=%q size=%d", url, mimeType, size)
+	}
+}

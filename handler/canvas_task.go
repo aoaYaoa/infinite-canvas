@@ -514,7 +514,11 @@ func imageBytesFromAIResponse(payload []byte) ([]byte, string, error) {
 func imageURLFromAIResponse(payload []byte) (string, string, int64, error) {
 	var root any
 	if err := json.Unmarshal(payload, &root); err != nil {
-		return "", "", 0, err
+		if sseRoot, sseErr := imageResponseFromSSE(payload); sseErr == nil {
+			root = sseRoot
+		} else {
+			return "", "", 0, err
+		}
 	}
 	for _, candidate := range collectImageCandidates(root, 0) {
 		if strings.HasPrefix(candidate, "http://") || strings.HasPrefix(candidate, "https://") {
@@ -530,6 +534,50 @@ func imageURLFromAIResponse(payload []byte) (string, string, int64, error) {
 		return "data:" + mimeType + ";base64," + candidate, mimeType, int64(len(data)), nil
 	}
 	return "", "", 0, errors.New("图片接口没有返回图片")
+}
+
+func imageResponseFromSSE(payload []byte) (any, error) {
+	completed := []any{}
+	events := []any{}
+	for _, block := range splitSSEBlocks(string(payload)) {
+		data := sseBlockData(block)
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+		var event map[string]any
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+		eventType := strings.TrimSpace(toStringSafe(event["type"]))
+		if eventType == "image_edit.completed" || eventType == "image_generation.completed" {
+			completed = append(completed, event)
+		}
+	}
+	if len(completed) > 0 {
+		return map[string]any{"data": completed}, nil
+	}
+	if len(events) > 0 {
+		return map[string]any{"data": events}, nil
+	}
+	return nil, errors.New("SSE 响应没有数据")
+}
+
+func splitSSEBlocks(value string) []string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	return strings.Split(value, "\n\n")
+}
+
+func sseBlockData(block string) string {
+	lines := []string{}
+	for _, line := range strings.Split(block, "\n") {
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		lines = append(lines, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func collectImageCandidates(value any, depth int) []string {
@@ -629,8 +677,6 @@ func taskTime() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
-
-
 func readCanvasTaskSources(r *http.Request) []string {
 	values := r.URL.Query()["source"]
 	result := make([]string, 0, len(values))
@@ -643,5 +689,3 @@ func readCanvasTaskSources(r *http.Request) []string {
 	}
 	return result
 }
-
-
