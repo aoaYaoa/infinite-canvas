@@ -7,6 +7,8 @@ import (
 	"mime/multipart"
 	"strings"
 	"testing"
+
+	"github.com/tigerowo/infinite-canvas/model"
 )
 
 func TestReadUpstreamAIErrorMessage(t *testing.T) {
@@ -62,6 +64,57 @@ func TestNormalizeGrok2APIImageEditBodyConvertsMultipartToJSON(t *testing.T) {
 	}
 	if strings.Contains(string(converted), "_canvas_endpoint") {
 		t.Fatalf("canvas metadata leaked into upstream payload: %s", string(converted))
+	}
+}
+
+func TestNormalizeVideoCreateBodyConvertsGrok2APIMultipartToJSON(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("model", "grok-imagine-video")
+	_ = writer.WriteField("prompt", "slow camera push")
+	_ = writer.WriteField("seconds", "6")
+	_ = writer.WriteField("size", "720x1280")
+	_ = writer.WriteField("resolution_name", "480p")
+	file, err := writer.CreateFormFile("input_reference[]", "input.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = file.Write([]byte("\x89PNG\r\n\x1a\nimage"))
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	converted, contentType, err := normalizeVideoCreateBody(body.Bytes(), writer.FormDataContentType(), "grok-imagine-video", model.ModelChannel{
+		Name:    "Grok2API",
+		BaseURL: "https://grok.uonoe.com/v1",
+	}, "/videos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("contentType = %q", contentType)
+	}
+	var payload struct {
+		Model          string `json:"model"`
+		Prompt         string `json:"prompt"`
+		Seconds        int    `json:"seconds"`
+		Size           string `json:"size"`
+		Quality        string `json:"quality"`
+		ImageReference *struct {
+			ImageURL string `json:"image_url"`
+		} `json:"image_reference"`
+	}
+	if err := json.Unmarshal(converted, &payload); err != nil {
+		t.Fatalf("json = %s err=%v", string(converted), err)
+	}
+	if payload.Model != "grok-imagine-video" || payload.Prompt != "slow camera push" || payload.Seconds != 6 || payload.Size != "720x1280" || payload.Quality != "480p" {
+		t.Fatalf("payload = %#v", payload)
+	}
+	if payload.ImageReference == nil || !strings.HasPrefix(payload.ImageReference.ImageURL, "data:image/png;base64,") {
+		t.Fatalf("image_reference = %#v", payload.ImageReference)
+	}
+	if strings.Contains(string(converted), "resolution_name") || strings.Contains(string(converted), "input_reference") {
+		t.Fatalf("unsupported fields leaked into upstream payload: %s", string(converted))
 	}
 }
 

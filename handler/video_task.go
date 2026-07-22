@@ -161,7 +161,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		ChannelName:     channel.Name,
 		Source:          readVideoTaskSource(r),
 		SourceID:        readVideoTaskSourceID(r),
-		ClientTaskID:     readClientVideoTaskID(r),
+		ClientTaskID:    readClientVideoTaskID(r),
 		UpstreamTaskID:  parsed.UpstreamTaskID,
 		UpstreamVideoID: parsed.UpstreamVideoID,
 		Status:          parsed.Status,
@@ -304,6 +304,9 @@ func normalizeVideoCreateBody(body []byte, contentType string, modelName string,
 	}
 	if isAPIMartChannel(channel, modelName) && upstreamPath == "/videos/generations" {
 		return normalizeAPIMartVideoBody(body, contentType, modelName, channel)
+	}
+	if isGrok2APIChannel(channel) && upstreamPath == "/videos" {
+		return normalizeGrok2APIVideoBody(body, contentType)
 	}
 	return body, contentType, nil
 }

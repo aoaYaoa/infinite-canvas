@@ -505,6 +505,39 @@ func normalizeGrok2APIImageEditBody(body []byte, contentType string) ([]byte, st
 	return encoded, "application/json", nil
 }
 
+func normalizeGrok2APIVideoBody(body []byte, contentType string) ([]byte, string, error) {
+	if !strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") {
+		return body, contentType, nil
+	}
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return body, contentType, err
+	}
+	form, err := multipart.NewReader(bytes.NewReader(body), params["boundary"]).ReadForm(64 << 20)
+	if err != nil {
+		return body, contentType, err
+	}
+	defer form.RemoveAll()
+
+	payload := map[string]any{}
+	copyGrok2APIStringField(payload, form, "model")
+	copyGrok2APIStringField(payload, form, "prompt")
+	copyGrok2APIVideoSizeField(payload, form)
+	copyGrok2APIVideoSecondsField(payload, form)
+	copyGrok2APIVideoQualityField(payload, form)
+	if imageURL, err := grok2APIVideoReferenceURL(form); err != nil {
+		return body, contentType, err
+	} else if imageURL != "" {
+		payload["image_reference"] = map[string]string{"image_url": imageURL}
+	}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return body, contentType, err
+	}
+	return encoded, "application/json", nil
+}
+
 func copyGrok2APIStringField(payload map[string]any, form *multipart.Form, key string) {
 	if values := form.Value[key]; len(values) > 0 && strings.TrimSpace(values[0]) != "" {
 		payload[key] = values[0]
@@ -527,6 +560,51 @@ func copyGrok2APIBoolField(payload map[string]any, form *multipart.Form, key str
 			payload[key] = value
 		}
 	}
+}
+
+func copyGrok2APIVideoSizeField(payload map[string]any, form *multipart.Form) {
+	for _, key := range []string{"size", "aspect_ratio"} {
+		if values := form.Value[key]; len(values) > 0 && strings.TrimSpace(values[0]) != "" {
+			payload["size"] = strings.TrimSpace(values[0])
+			return
+		}
+	}
+}
+
+func copyGrok2APIVideoSecondsField(payload map[string]any, form *multipart.Form) {
+	for _, key := range []string{"seconds", "duration", "video_length"} {
+		if values := form.Value[key]; len(values) > 0 {
+			value, err := strconv.Atoi(strings.TrimSpace(values[0]))
+			if err == nil {
+				payload["seconds"] = value
+				return
+			}
+		}
+	}
+}
+
+func copyGrok2APIVideoQualityField(payload map[string]any, form *multipart.Form) {
+	for _, key := range []string{"quality", "resolution_name", "resolution"} {
+		if values := form.Value[key]; len(values) > 0 && strings.TrimSpace(values[0]) != "" {
+			payload["quality"] = strings.TrimSpace(values[0])
+			return
+		}
+	}
+}
+
+func grok2APIVideoReferenceURL(form *multipart.Form) (string, error) {
+	for _, key := range []string{"image_reference", "image", "input_reference", "input_reference[]", "first_frame_url"} {
+		for _, value := range form.Value[key] {
+			value = strings.TrimSpace(value)
+			if value != "" {
+				return value, nil
+			}
+		}
+		for _, header := range form.File[key] {
+			return grok2APIFormFileDataURL(header)
+		}
+	}
+	return "", nil
 }
 
 func grok2APIImageEditInputs(form *multipart.Form) ([]map[string]string, error) {
