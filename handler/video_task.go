@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -332,6 +333,9 @@ func transformVideoCreatePayload(payload []byte, request *http.Request, channel 
 			return transformed
 		}
 	}
+	if isGrok2APIChannel(channel) && strings.Contains(request.URL.Path, "/videos") {
+		return absolutizeGrok2APIVideoURLs(payload, channel)
+	}
 	return payload
 }
 
@@ -346,7 +350,89 @@ func transformVideoStatusPayload(payload []byte, request *http.Request, channel 
 			return transformed
 		}
 	}
+	if isGrok2APIChannel(channel) {
+		return absolutizeGrok2APIVideoURLs(payload, channel)
+	}
 	return payload
+}
+
+func absolutizeGrok2APIVideoURLs(payload []byte, channel model.ModelChannel) []byte {
+	var root any
+	if len(payload) == 0 || json.Unmarshal(payload, &root) != nil {
+		return payload
+	}
+	changed := absolutizeGrok2APIVideoURLValue(&root, "", channel)
+	if !changed {
+		return payload
+	}
+	encoded, err := json.Marshal(root)
+	if err != nil {
+		return payload
+	}
+	return encoded
+}
+
+func absolutizeGrok2APIVideoURLValue(value *any, key string, channel model.ModelChannel) bool {
+	switch typed := (*value).(type) {
+	case map[string]any:
+		changed := false
+		for childKey, item := range typed {
+			if absolutizeGrok2APIVideoURLValue(&item, childKey, channel) {
+				typed[childKey] = item
+				changed = true
+			}
+		}
+		return changed
+	case []any:
+		changed := false
+		for index, item := range typed {
+			if absolutizeGrok2APIVideoURLValue(&item, key, channel) {
+				typed[index] = item
+				changed = true
+			}
+		}
+		return changed
+	case string:
+		if !isVideoURLField(key) {
+			return false
+		}
+		absolute := absoluteGrok2APIURL(channel, typed)
+		if absolute == typed {
+			return false
+		}
+		*value = absolute
+		return true
+	default:
+		return false
+	}
+}
+
+func isVideoURLField(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "url", "video_url", "videourl", "download_url", "downloadurl", "output_url", "outputurl":
+		return true
+	default:
+		return false
+	}
+}
+
+func absoluteGrok2APIURL(channel model.ModelChannel, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") || strings.HasPrefix(value, "data:") {
+		return value
+	}
+	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(channel.BaseURL), "/"))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return value
+	}
+	if strings.HasPrefix(value, "/") {
+		return parsed.Scheme + "://" + parsed.Host + value
+	}
+	base := strings.TrimRight(parsed.Path, "/")
+	if base == "" {
+		base = "/v1"
+	}
+	return parsed.Scheme + "://" + parsed.Host + base + "/" + strings.TrimLeft(value, "/")
 }
 
 func readVideoCreateErrorMessage(raw []byte, transformed []byte, channel model.ModelChannel, modelName string) string {

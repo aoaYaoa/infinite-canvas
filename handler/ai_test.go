@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"mime/multipart"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -123,6 +124,27 @@ func TestHasVideoCreateResultAcceptsSynchronousVideoURL(t *testing.T) {
 
 	if !hasVideoCreateResult(parsed) {
 		t.Fatalf("expected synchronous video URL response to be accepted: %#v", parsed)
+	}
+}
+
+func TestTransformVideoCreatePayloadAbsolutizesGrok2APIRelativeVideoURL(t *testing.T) {
+	request, err := http.NewRequest(http.MethodPost, "https://grok.uonoe.com/v1/videos", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"request_id":"video_123","url":"/v1/files/video/generated.mp4","video_url":"/v1/files/video/generated.mp4"}`)
+
+	transformed := transformVideoCreatePayload(payload, request, model.ModelChannel{
+		Name:    "Grok2API",
+		BaseURL: "https://grok.uonoe.com/v1",
+	}, "grok-imagine-video")
+	parsed := parseVideoTaskPayload(transformed, "grok-imagine-video")
+
+	if parsed.VideoURL != "https://grok.uonoe.com/v1/files/video/generated.mp4" {
+		t.Fatalf("video URL = %q, payload=%s", parsed.VideoURL, string(transformed))
+	}
+	if strings.Contains(string(transformed), `"/v1/files/video/generated.mp4"`) {
+		t.Fatalf("relative URL leaked into transformed payload: %s", string(transformed))
 	}
 }
 
