@@ -2579,6 +2579,8 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         }),
     );
     const visibleImages = images.filter((image) => Boolean(image.dataUrl));
+    const taskImage = imageFromCompletedTask(log.task, log.durationMs || 0);
+    const restoredImages = visibleImages.length || !taskImage ? visibleImages : [taskImage];
     const config = normalizeLogConfig(log);
     return {
         id: log.id || nanoid(),
@@ -2590,14 +2592,14 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         config,
         references,
         durationMs: log.durationMs || 0,
-        successCount: log.successCount ?? log.imageCount ?? 0,
+        successCount: log.successCount ?? log.imageCount ?? restoredImages.length,
         failCount: log.failCount || 0,
-        imageCount: log.imageCount || log.successCount || 0,
+        imageCount: log.imageCount || log.successCount || restoredImages.length,
         size: log.size || config.size || "",
         quality: log.quality || config.quality || "",
         status: log.status || "成功",
-        images: visibleImages,
-        thumbnails: visibleImages.map((image) => image.dataUrl),
+        images: restoredImages,
+        thumbnails: restoredImages.map((image) => image.dataUrl),
         errors: log.errors || [],
         errorDetails: log.errorDetails || [],
         categoryIds: Array.isArray(log.categoryIds) ? log.categoryIds : [],
@@ -2607,6 +2609,21 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         workflowTaskId: log.workflowTaskId,
         task: log.task,
         lastPolledAt: log.lastPolledAt,
+    };
+}
+
+function imageFromCompletedTask(task: CanvasImageTask | undefined, durationMs: number): GeneratedImage | null {
+    const dataUrl = task?.image_url || task?.url || "";
+    if (!task || !dataUrl || !isCompletedImageTask(task)) return null;
+    return {
+        id: task.id,
+        dataUrl,
+        storageKey: task.storageKey,
+        durationMs,
+        width: task.width || 0,
+        height: task.height || 0,
+        bytes: task.bytes || 0,
+        mimeType: task.mimeType || "image/png",
     };
 }
 
@@ -2774,7 +2791,6 @@ function buildLog({
 function formatLogTime(value: number) {
     return new Date(value).toLocaleString("zh-CN", { hour12: false });
 }
-
 
 
 
