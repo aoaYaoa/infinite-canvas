@@ -115,8 +115,8 @@ export default function AdminUsersPage() {
     ];
 
     return (
-        <main style={{ padding: 24 }}>
-            <Flex vertical gap={16}>
+        <main style={{ width: "100%", maxWidth: "100%", minWidth: 0, boxSizing: "border-box", padding: 24 }}>
+            <Flex vertical gap={16} style={{ width: "100%", minWidth: 0 }}>
                 <Card variant="borderless">
                     <Form layout="vertical">
                         <Row gutter={16} align="bottom">
@@ -160,6 +160,7 @@ export default function AdminUsersPage() {
                     search={false}
                     defaultSize="middle"
                     tableLayout="fixed"
+                    scroll={{ x: 1040 }}
                     cardProps={{ variant: "borderless" }}
                     headerTitle={
                         <Space>

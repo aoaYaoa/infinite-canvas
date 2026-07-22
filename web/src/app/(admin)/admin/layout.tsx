@@ -63,7 +63,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     }
 
     return (
-        <Layout hasSider style={{ height: "100vh", overflow: "hidden", background: antToken.colorBgLayout }}>
+        <Layout hasSider style={{ width: "100vw", maxWidth: "100vw", height: "100vh", overflow: "hidden", background: antToken.colorBgLayout }}>
             <Layout.Sider width={adminLayoutStyle.siderWidth} style={{ height: "100vh", overflow: "hidden", background: antToken.colorBgContainer, borderRight: `1px solid ${antToken.colorBorder}` }}>
                 <Flex align="center" gap={12} style={{ height: adminLayoutStyle.brandHeight, padding: "0 20px", borderBottom: `1px solid ${antToken.colorBorderSecondary}` }}>
                     <span aria-hidden style={{ display: "inline-block", width: 30, height: 30, background: antToken.colorText, WebkitMask: "url(/logo.svg) center / contain no-repeat", mask: "url(/logo.svg) center / contain no-repeat" }} />
@@ -94,7 +94,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                     </Button>
                 </Flex>
             </Layout.Sider>
-            <Layout style={{ minWidth: 0, minHeight: 0, height: "100vh", overflow: "hidden", background: antToken.colorBgLayout }}>
+            <Layout style={{ flex: "1 1 0", width: `calc(100vw - ${adminLayoutStyle.siderWidth}px)`, maxWidth: `calc(100vw - ${adminLayoutStyle.siderWidth}px)`, minWidth: 0, minHeight: 0, height: "100vh", overflow: "hidden", background: antToken.colorBgLayout }}>
                 <Layout.Header
                     style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: adminLayoutStyle.headerHeight, padding: "0 24px", background: antToken.colorBgContainer, borderBottom: `1px solid ${antToken.colorBorder}` }}
                 >
@@ -105,7 +105,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                         <UserStatusActions showConfig={false} />
                     </Flex>
                 </Layout.Header>
-                <Layout.Content style={{ minWidth: 0, minHeight: 0, overflow: "auto" }}>{children}</Layout.Content>
+                <Layout.Content style={{ minWidth: 0, minHeight: 0, overflowX: "hidden", overflowY: "auto" }}>{children}</Layout.Content>
             </Layout>
         </Layout>
     );
