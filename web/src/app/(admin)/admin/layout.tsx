@@ -94,7 +94,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                     </Button>
                 </Flex>
             </Layout.Sider>
-            <Layout style={{ background: antToken.colorBgLayout }}>
+            <Layout style={{ minWidth: 0, minHeight: 0, height: "100vh", overflow: "hidden", background: antToken.colorBgLayout }}>
                 <Layout.Header
                     style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: adminLayoutStyle.headerHeight, padding: "0 24px", background: antToken.colorBgContainer, borderBottom: `1px solid ${antToken.colorBorder}` }}
                 >
@@ -105,7 +105,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                         <UserStatusActions showConfig={false} />
                     </Flex>
                 </Layout.Header>
-                <Layout.Content style={{ minHeight: 0, overflow: "auto" }}>{children}</Layout.Content>
+                <Layout.Content style={{ minWidth: 0, minHeight: 0, overflow: "auto" }}>{children}</Layout.Content>
             </Layout>
         </Layout>
     );
