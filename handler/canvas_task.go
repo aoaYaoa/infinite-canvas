@@ -275,6 +275,9 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 			return
 		}
 		if message := readWrappedTaskError(payload); message != "" {
+			if attempt == 0 && shouldRetryCanvasImageTaskFailure(status, payload, errors.New(message)) {
+				continue
+			}
 			saveFailedCanvasImageTask(task, message, string(payload))
 			return
 		}
@@ -307,32 +310,30 @@ func shouldRetryCanvasImageTaskFailure(status int, payload []byte, parseErr erro
 	if status == http.StatusTooManyRequests {
 		return false
 	}
-	if status >= http.StatusInternalServerError {
-		var root struct {
-			Error *struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
+	var root struct {
+		Error *struct {
 			Code    string `json:"code"`
-			Msg     string `json:"msg"`
 			Message string `json:"message"`
-		}
-		if json.Unmarshal(payload, &root) == nil {
-			code := strings.ToLower(strings.TrimSpace(firstNonEmpty(root.Code, func() string {
-				if root.Error != nil {
-					return root.Error.Code
-				}
-				return ""
-			}())))
-			message := firstNonEmpty(root.Msg, root.Message, func() string {
-				if root.Error != nil {
-					return root.Error.Message
-				}
-				return ""
-			}())
-			if code == "image_edit_incomplete" || strings.Contains(message, "未返回可用的编辑图片") {
-				return true
+		} `json:"error"`
+		Code    any    `json:"code"`
+		Msg     string `json:"msg"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(payload, &root) == nil {
+		code := strings.ToLower(strings.TrimSpace(firstNonEmpty(toStringSafe(root.Code), func() string {
+			if root.Error != nil {
+				return root.Error.Code
 			}
+			return ""
+		}())))
+		message := firstNonEmpty(root.Msg, root.Message, func() string {
+			if root.Error != nil {
+				return root.Error.Message
+			}
+			return ""
+		}())
+		if code == "image_edit_incomplete" || strings.Contains(message, "未返回可用的编辑图片") {
+			return true
 		}
 	}
 	if status >= http.StatusOK && status < http.StatusMultipleChoices && parseErr != nil && len(bytes.TrimSpace(payload)) == 0 {

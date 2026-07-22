@@ -87,6 +87,14 @@ func TestShouldRetryCanvasImageTaskFailureForIncompleteGrok2APIEdit(t *testing.T
 	}
 }
 
+func TestShouldRetryCanvasImageTaskFailureForWrappedIncompleteGrok2APIEdit(t *testing.T) {
+	payload := []byte(`{"code":1,"data":null,"msg":"上游未返回可用的编辑图片"}`)
+
+	if !shouldRetryCanvasImageTaskFailure(200, payload, errors.New("上游未返回可用的编辑图片")) {
+		t.Fatal("expected wrapped incomplete Grok2API image edit to be retried")
+	}
+}
+
 func TestShouldRetryCanvasImageTaskFailureForEmptySuccessfulResponse(t *testing.T) {
 	if !shouldRetryCanvasImageTaskFailure(200, nil, errors.New("unexpected end of JSON input")) {
 		t.Fatal("expected empty successful image response to be retried")
