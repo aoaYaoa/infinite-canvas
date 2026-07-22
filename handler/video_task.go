@@ -144,7 +144,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parsed := parseVideoTaskPayload(transformed, modelName)
-	if parsed.UpstreamTaskID == "" && parsed.UpstreamVideoID == "" {
+	if !hasVideoCreateResult(parsed) {
 		if credits > 0 {
 			refundVideoCredits(user.ID, modelName, credits, upstreamPath)
 		}
@@ -412,6 +412,10 @@ func parseVideoTaskPayload(payload []byte, modelName string) parsedVideoTaskPayl
 		result.ErrorDetail = string(payload)
 	}
 	return result
+}
+
+func hasVideoCreateResult(parsed parsedVideoTaskPayload) bool {
+	return strings.TrimSpace(parsed.UpstreamTaskID) != "" || strings.TrimSpace(parsed.UpstreamVideoID) != "" || strings.TrimSpace(parsed.VideoURL) != ""
 }
 
 func normalizeVideoPayloadMap(value any) map[string]any {

@@ -118,6 +118,14 @@ func TestNormalizeVideoCreateBodyConvertsGrok2APIMultipartToJSON(t *testing.T) {
 	}
 }
 
+func TestHasVideoCreateResultAcceptsSynchronousVideoURL(t *testing.T) {
+	parsed := parseVideoTaskPayload([]byte(`{"url":"https://cdn.example.com/generated.mp4","video_url":"https://cdn.example.com/generated.mp4"}`), "grok-imagine-video")
+
+	if !hasVideoCreateResult(parsed) {
+		t.Fatalf("expected synchronous video URL response to be accepted: %#v", parsed)
+	}
+}
+
 func TestImageURLFromAIResponseReadsImageEditSSE(t *testing.T) {
 	payload := []byte("event: image_edit.completed\n" +
 		"data: {\"type\":\"image_edit.completed\",\"b64_json\":\"iVBORw0KGgo=\",\"size\":\"1024x1024\"}\n\n" +
