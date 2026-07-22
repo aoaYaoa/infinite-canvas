@@ -254,24 +254,39 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 	task.StartedAt = current
 	task, _ = service.SaveCanvasImageTask(task)
 
-	payload, status, _, err := executeCanvasAIRequest(user, task.Endpoint, body, contentType, channelID, userChannelID)
-	if err != nil {
-		saveFailedCanvasImageTask(task, err.Error(), err.Error())
-		return
-	}
-	if status >= http.StatusBadRequest {
-		message := readUpstreamAIErrorMessage(payload, status)
-		saveFailedCanvasImageTask(task, message, string(payload))
-		return
-	}
-	if message := readWrappedTaskError(payload); message != "" {
-		saveFailedCanvasImageTask(task, message, string(payload))
-		return
-	}
-	imageURL, mimeType, bytes, err := imageURLFromAIResponse(payload)
-	if err != nil {
-		saveFailedCanvasImageTask(task, err.Error(), string(payload))
-		return
+	var payload []byte
+	var status int
+	var imageURL string
+	var mimeType string
+	var bytes int64
+	for attempt := 0; attempt < 2; attempt++ {
+		var err error
+		payload, status, _, err = executeCanvasAIRequest(user, task.Endpoint, body, contentType, channelID, userChannelID)
+		if err != nil {
+			saveFailedCanvasImageTask(task, err.Error(), err.Error())
+			return
+		}
+		if status >= http.StatusBadRequest {
+			if attempt == 0 && shouldRetryCanvasImageTaskFailure(status, payload, nil) {
+				continue
+			}
+			message := readUpstreamAIErrorMessage(payload, status)
+			saveFailedCanvasImageTask(task, message, string(payload))
+			return
+		}
+		if message := readWrappedTaskError(payload); message != "" {
+			saveFailedCanvasImageTask(task, message, string(payload))
+			return
+		}
+		imageURL, mimeType, bytes, err = imageURLFromAIResponse(payload)
+		if err != nil {
+			if attempt == 0 && shouldRetryCanvasImageTaskFailure(status, payload, err) {
+				continue
+			}
+			saveFailedCanvasImageTask(task, err.Error(), string(payload))
+			return
+		}
+		break
 	}
 	task.Status = "completed"
 	task.Progress = 100
@@ -286,6 +301,45 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 	task.Error = ""
 	task.ErrorDetail = ""
 	_, _ = service.SaveCanvasImageTask(task)
+}
+
+func shouldRetryCanvasImageTaskFailure(status int, payload []byte, parseErr error) bool {
+	if status == http.StatusTooManyRequests {
+		return false
+	}
+	if status >= http.StatusInternalServerError {
+		var root struct {
+			Error *struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+			Code    string `json:"code"`
+			Msg     string `json:"msg"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(payload, &root) == nil {
+			code := strings.ToLower(strings.TrimSpace(firstNonEmpty(root.Code, func() string {
+				if root.Error != nil {
+					return root.Error.Code
+				}
+				return ""
+			}())))
+			message := firstNonEmpty(root.Msg, root.Message, func() string {
+				if root.Error != nil {
+					return root.Error.Message
+				}
+				return ""
+			}())
+			if code == "image_edit_incomplete" || strings.Contains(message, "未返回可用的编辑图片") {
+				return true
+			}
+		}
+	}
+	if status >= http.StatusOK && status < http.StatusMultipleChoices && parseErr != nil && len(bytes.TrimSpace(payload)) == 0 {
+		message := strings.ToLower(parseErr.Error())
+		return strings.Contains(message, "unexpected end") || strings.Contains(message, "unexpected eof") || message == "eof"
+	}
+	return false
 }
 
 func runCanvasAudioTask(task model.CanvasAudioTask, user model.AuthUser, body []byte, contentType string, channelID string, userChannelID string) {

@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"strings"
 	"testing"
@@ -75,5 +76,27 @@ func TestImageURLFromAIResponseReadsImageEditSSE(t *testing.T) {
 	}
 	if url != "data:image/png;base64,iVBORw0KGgo=" || mimeType != "image/png" || size != 8 {
 		t.Fatalf("url=%q mime=%q size=%d", url, mimeType, size)
+	}
+}
+
+func TestShouldRetryCanvasImageTaskFailureForIncompleteGrok2APIEdit(t *testing.T) {
+	payload := []byte(`{"error":{"code":"image_edit_incomplete","message":"上游未返回可用的编辑图片","type":"server_error"}}`)
+
+	if !shouldRetryCanvasImageTaskFailure(502, payload, nil) {
+		t.Fatal("expected incomplete Grok2API image edit to be retried")
+	}
+}
+
+func TestShouldRetryCanvasImageTaskFailureForEmptySuccessfulResponse(t *testing.T) {
+	if !shouldRetryCanvasImageTaskFailure(200, nil, errors.New("unexpected end of JSON input")) {
+		t.Fatal("expected empty successful image response to be retried")
+	}
+}
+
+func TestShouldRetryCanvasImageTaskFailureKeepsQuotaErrorsFinal(t *testing.T) {
+	payload := []byte(`{"error":{"code":"upstream_unavailable","message":"上游账号额度等待恢复","type":"server_error"}}`)
+
+	if shouldRetryCanvasImageTaskFailure(429, payload, nil) {
+		t.Fatal("quota errors should not be retried by canvas")
 	}
 }
