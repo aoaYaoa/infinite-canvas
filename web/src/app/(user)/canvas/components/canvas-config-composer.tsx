@@ -139,10 +139,26 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                     ref={editorRef}
                     contentEditable
                     suppressContentEditableWarning
-                    className="thin-scrollbar h-64 w-full overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-sm leading-7 outline-none"
+                    className="thin-scrollbar h-64 w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-sm leading-7 outline-none"
                     style={{ color: theme.node.text }}
                     onInput={() => {
                         if (!composingRef.current) syncFromEditor();
+                    }}
+                    onPaste={(event) => {
+                        const text = event.clipboardData.getData("text/plain");
+                        if (!text) return;
+                        event.preventDefault();
+                        const selection = window.getSelection();
+                        const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+                        if (!range) return;
+                        range.deleteContents();
+                        const textNode = document.createTextNode(text);
+                        range.insertNode(textNode);
+                        range.setStartAfter(textNode);
+                        range.collapse(true);
+                        selection?.removeAllRanges();
+                        selection?.addRange(range);
+                        syncFromEditor();
                     }}
                     onCompositionStart={() => {
                         composingRef.current = true;
@@ -271,12 +287,25 @@ function serializeEditor(editor: HTMLElement) {
 function serializeNodes(nodes: NodeListOf<ChildNode>) {
     let result = "";
     nodes.forEach((node) => {
-        if (node.nodeType === Node.TEXT_NODE) result += node.textContent || "";
+        if (node.nodeType === Node.TEXT_NODE) {
+            result += node.textContent || "";
+            return;
+        }
         if (!(node instanceof HTMLElement)) return;
+        if (node.tagName === "BR") {
+            result += "\n";
+            return;
+        }
         const nodeId = node.dataset.referenceNodeId;
-        if (nodeId) result += `@[node:${nodeId}]`;
-        else if (node.tagName === "BR") result += "\n";
-        else result += serializeNodes(node.childNodes);
+        if (nodeId) {
+            result += `@[node:${nodeId}]`;
+            return;
+        }
+        const content = serializeNodes(node.childNodes);
+        const isBlock = node.tagName === "DIV" || node.tagName === "P";
+        if (isBlock && result && !result.endsWith("\n")) result += "\n";
+        result += content;
+        if (isBlock && !content) result += "\n";
     });
     return result;
 }
