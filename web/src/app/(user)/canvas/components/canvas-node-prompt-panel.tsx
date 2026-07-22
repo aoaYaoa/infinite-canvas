@@ -45,18 +45,17 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const isPanorama = isPanoramaNodeType(node.type);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = isCanvasImageNodeType(node.type) && Boolean(node.metadata?.content);
-    const isEditingExistingContent = !isPanorama && (hasTextContent || hasImageContent);
     const sourcePrompt = isPanorama ? node.metadata?.panoramaSourcePrompt || "" : node.metadata?.prompt || "";
-    const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : sourcePrompt);
+    const [prompt, setPrompt] = useState(sourcePrompt);
     const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? config.count : 1 });
 
     useEffect(() => {
-        setPrompt(isEditingExistingContent ? "" : sourcePrompt);
-    }, [isEditingExistingContent, node.id, sourcePrompt]);
+        setPrompt(sourcePrompt);
+    }, [node.id, sourcePrompt]);
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
-        if (!isEditingExistingContent) onPromptChange(node.id, value);
+        onPromptChange(node.id, value);
     };
 
     const canSubmit = Boolean(prompt.trim()) || (isPanorama && (hasImageContent || mentionReferences.length > 0));
@@ -70,6 +69,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     return (
         <div
+            data-canvas-no-zoom
             className="rounded-2xl border p-3 shadow-2xl backdrop-blur"
             style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
@@ -81,8 +81,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 references={mentionReferences}
                 onChange={updatePrompt}
                 onSubmit={submit}
-                className="thin-scrollbar h-24 w-full resize-none rounded-xl border px-3 py-2 text-sm leading-5 outline-none"
-                style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
+                className="thin-scrollbar h-40 w-full resize-none rounded-xl px-3 py-2 text-sm leading-5 outline-none"
+                style={{ background: "transparent", color: theme.node.text }}
                 placeholder={isPanorama ? "描述想生成的全景，或上传/连接图片作为参考" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
 

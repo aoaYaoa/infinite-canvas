@@ -743,7 +743,6 @@ export default function ImagePage() {
             await Promise.all(duplicateLogs.map((item) => logStore.removeItem(item.id)));
             await logStore.setItem(log.id, serializeLog(log));
             await persistImageHistory(nextLogs, categories);
-            await refreshLogs();
         })();
         saveLogChainRef.current = nextChain;
         await nextChain;
