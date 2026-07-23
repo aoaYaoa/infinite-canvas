@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Globe2, Home, ImageIcon, Images, Layers3, List, Menu, MessageSquare, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
+import { ChevronLeft, ChevronRight, Globe2, Home, ImageIcon, Images, Layers3, List, Menu, MessageSquare, Music2, PanelLeftClose, PanelLeftOpen, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { deleteCanvasProjects, deleteCanvasTasks } from "@/services/api/canvas-tasks";
@@ -50,7 +50,8 @@ import type { CanvasVideoResourceOption } from "../components/canvas-video-setti
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import { AssetPickerModal, type AssetPickerTab, type InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
-import { useCanvasStore } from "../stores/use-canvas-store";
+import { CANVAS_ASSET_DRAG_TYPE, CanvasSidePanel } from "../components/canvas-side-panel";
+import { DEFAULT_CANVAS_SIDE_PANEL, useCanvasStore } from "../stores/use-canvas-store";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import {
     CanvasNodeType,
@@ -280,12 +281,15 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const assetInsertPositionRef = useRef<Position | null>(null);
+    const draggedAssetPayloadRef = useRef<InsertAssetPayload | null>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
     const clipboardRef = useRef<CanvasClipboard | null>(null);
     const historyRef = useRef<{ past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }>({ past: [], future: [] });
     const lastHistoryRef = useRef<CanvasHistoryEntry | null>(null);
     const historyCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const viewportSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const sidePanelSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const focusAnimationRef = useRef<number | null>(null);
     const applyingHistoryRef = useRef(false);
     const historyPausedRef = useRef(false);
     const didInitialCenterRef = useRef(false);
@@ -342,6 +346,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(false);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
     const [showImageInfo, setShowImageInfo] = useState(false);
+    const [sidePanel, setSidePanel] = useState(() => DEFAULT_CANVAS_SIDE_PANEL);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [assetPickerTab, setAssetPickerTab] = useState<AssetPickerTab>("my-assets");
@@ -455,6 +460,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             setBackgroundMode(project.backgroundMode);
             setShowImageInfo(project.showImageInfo || false);
             setViewport(project.viewport);
+            setSidePanel(project.sidePanel || DEFAULT_CANVAS_SIDE_PANEL);
             historyRef.current = { past: [], future: [] };
             if (historyCommitTimerRef.current) {
                 clearTimeout(historyCommitTimerRef.current);
@@ -578,6 +584,18 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
         };
     }, [projectId, projectLoaded, updateProject, viewport]);
+
+    useEffect(() => {
+        if (!projectLoaded) return;
+        if (sidePanelSaveTimerRef.current) clearTimeout(sidePanelSaveTimerRef.current);
+        sidePanelSaveTimerRef.current = setTimeout(() => {
+            updateProject(projectId, { sidePanel });
+            sidePanelSaveTimerRef.current = null;
+        }, 500);
+        return () => {
+            if (sidePanelSaveTimerRef.current) clearTimeout(sidePanelSaveTimerRef.current);
+        };
+    }, [projectId, projectLoaded, sidePanel, updateProject]);
 
     useLayoutEffect(() => {
         nodesRef.current = nodes;
@@ -866,7 +884,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         return map;
     }, [connections, nodeById, nodes]);
     const createNode = useCallback(
-        (type: CanvasNodeType, position?: Position) => {
+        (type: CanvasNodeType, position?: Position, textContent?: string) => {
             const targetPosition = position || getCanvasCenter();
             const configMetadata =
                 type === CanvasNodeType.Config
@@ -876,8 +894,14 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
                     }
                     : undefined;
-            const newNode = createCanvasNode(type, targetPosition, configMetadata);
-
+            const newNode = createCanvasNode(
+                type,
+                targetPosition,
+                type === CanvasNodeType.Text && textContent !== undefined
+                    ? { content: textContent, status: NODE_STATUS_SUCCESS }
+                    : configMetadata,
+            );
+            if (type === CanvasNodeType.Text && textContent !== undefined) newNode.title = textContent.slice(0, 32) || "Assistant Text";
             setNodes((prev) => [...prev, newNode]);
             setSelectedNodeIds(new Set([newNode.id]));
             setSelectedConnectionId(null);
@@ -2248,16 +2272,46 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas, size.height, size.width],
     );
 
+    function insertAssetAt(payload: InsertAssetPayload, position?: Position) {
+        const center = position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
+        if (payload.kind === "text") {
+            createNode(CanvasNodeType.Text, position, payload.content);
+            return;
+        }
+        if (payload.kind === "video") {
+            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
+            const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+            const nextSize = fitNodeSize(payload.width || spec.width, payload.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+            setNodes((prev) => [...prev, { id, type: CanvasNodeType.Video, title: payload.title, position: { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 }, width: nextSize.width, height: nextSize.height, metadata: { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height } }]);
+            setSelectedNodeIds(new Set([id]));
+            setSelectedConnectionId(null);
+            return;
+        }
+        if (payload.kind === "audio") {
+            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
+            const id = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+            setNodes((prev) => [...prev, { id, type: CanvasNodeType.Audio, title: payload.title, position: { x: center.x - spec.width / 2, y: center.y - spec.height / 2 }, width: spec.width, height: spec.height, metadata: { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, bytes: payload.bytes, mimeType: payload.mimeType || "audio/mpeg", durationMs: payload.durationMs } }]);
+            setSelectedNodeIds(new Set([id]));
+            setSelectedConnectionId(null);
+            return;
+        }
+        insertAssistantImage({ id: `asset-${Date.now()}`, prompt: payload.title, dataUrl: payload.dataUrl, storageKey: payload.storageKey, source: payload.source }, position);
+    }
+
     const handleDrop = useCallback(
         (event: ReactDragEvent<HTMLDivElement>) => {
             event.preventDefault();
+            const payload = draggedAssetPayloadRef.current;
+            if (event.dataTransfer.getData(CANVAS_ASSET_DRAG_TYPE) && payload) {
+                insertAssetAt(payload, screenToCanvas(event.clientX, event.clientY));
+                return;
+            }
             const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item));
             if (!file) return;
-
             const pos = screenToCanvas(event.clientX, event.clientY);
             void (isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos, true));
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas],
+        [createAudioFileNode, createImageFileNode, createVideoFileNode, insertAssetAt, screenToCanvas],
     );
 
     const pasteAssistantImage = useCallback(
@@ -2907,30 +2961,75 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         (payload: InsertAssetPayload) => {
             const position = assetInsertPositionRef.current || undefined;
             assetInsertPositionRef.current = null;
-            if (payload.kind === "text") {
-                insertAssistantText(payload.content, position);
-            } else if (payload.kind === "video") {
-                const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
-                const center = position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-                const nextSize = fitNodeSize(payload.width || spec.width, payload.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                setNodes((prev) => [...prev, { id, type: CanvasNodeType.Video, title: payload.title, position: { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 }, width: nextSize.width, height: nextSize.height, metadata: { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height } }]);
-                setSelectedNodeIds(new Set([id]));
-            } else {
-                insertAssistantImage({ id: `asset-${Date.now()}`, prompt: payload.title, dataUrl: payload.dataUrl, storageKey: payload.storageKey, source: payload.source }, position);
-            }
+            insertAssetAt(payload, position);
             setAssetPickerOpen(false);
         },
-        [insertAssistantImage, insertAssistantText, screenToCanvas, size.height, size.width],
+        [insertAssetAt],
     );
+
+    const focusNode = useCallback(
+        (nodeId: string) => {
+            const node = nodesRef.current.find((item) => item.id === nodeId);
+            if (!node) return;
+            const rootId = node.metadata?.batchRootId;
+            if (rootId && !nodesRef.current.find((item) => item.id === rootId)?.metadata?.imageBatchExpanded) {
+                toggleBatchExpanded(rootId);
+            }
+            const worldX = node.position.x + node.width / 2;
+            const worldY = node.position.y + node.height / 2;
+            const k = Math.min(Math.max(Math.min((size.width * 0.6) / node.width, (size.height * 0.6) / node.height), 0.05), 1.5);
+            const target = { x: size.width / 2 - worldX * k, y: size.height / 2 - worldY * k, k };
+            setSelectedNodeIds(new Set([node.id]));
+            setSelectedConnectionId(null);
+            setContextMenu(null);
+            if (focusAnimationRef.current) cancelAnimationFrame(focusAnimationRef.current);
+            const start = { ...viewportRef.current };
+            const duration = 450;
+            let startTime: number | null = null;
+            const step = (now: number) => {
+                if (!startTime) startTime = now;
+                const progress = Math.min(1, (now - startTime) / duration);
+                const eased = 1 - Math.pow(1 - progress, 3);
+                const next = { x: start.x + (target.x - start.x) * eased, y: start.y + (target.y - start.y) * eased, k: start.k + (target.k - start.k) * eased };
+                viewportRef.current = next;
+                setViewport(next);
+                focusAnimationRef.current = progress < 1 ? requestAnimationFrame(step) : null;
+            };
+            focusAnimationRef.current = requestAnimationFrame(step);
+        },
+        [size.height, size.width, toggleBatchExpanded],
+    );
+
+    useEffect(() => () => {
+        if (focusAnimationRef.current) cancelAnimationFrame(focusAnimationRef.current);
+    }, []);
 
     if (!projectLoaded) return <CanvasRefreshShell />;
 
     return (
         <main className="flex h-full min-h-0 overflow-hidden" style={{ background: theme.canvas.background, color: theme.node.text }}>
+            <CanvasSidePanel
+                nodes={nodes}
+                selectedNodeIds={selectedNodeIds}
+                open={sidePanel.open}
+                width={sidePanel.width}
+                onWidthChange={(width) => setSidePanel((current) => ({ ...current, width }))}
+                onFocusNode={focusNode}
+                onAssetDragStart={(payload) => {
+                    draggedAssetPayloadRef.current = payload;
+                }}
+                onAssetDragEnd={() => {
+                    window.setTimeout(() => {
+                        draggedAssetPayloadRef.current = null;
+                    }, 0);
+                }}
+                onInsertAsset={handleAssetInsert}
+            />
             <section className="relative min-w-0 flex-1 overflow-hidden">
                 <CanvasTopBar
                     title={currentProject?.title || "未命名画布"}
+                    sidePanelOpen={sidePanel.open}
+                    onToggleSidePanel={() => setSidePanel((current) => ({ ...current, open: !current.open }))}
                     titleDraft={titleDraft}
                     isTitleEditing={titleEditing}
                     onTitleDraftChange={setTitleDraft}
@@ -3457,6 +3556,8 @@ function FullscreenPreview({ src, alt, isPanorama, onClose, hasPrev, hasNext, on
 
 function CanvasTopBar({
     title,
+    sidePanelOpen,
+    onToggleSidePanel,
     titleDraft,
     isTitleEditing,
     onTitleDraftChange,
@@ -3476,6 +3577,8 @@ function CanvasTopBar({
     onExpandAssistant,
 }: {
     title: string;
+    sidePanelOpen: boolean;
+    onToggleSidePanel: () => void;
     titleDraft: string;
     isTitleEditing: boolean;
     onTitleDraftChange: (value: string) => void;
@@ -3523,6 +3626,9 @@ function CanvasTopBar({
         <>
             <div className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-16 items-center justify-between px-4">
                 <div className="pointer-events-auto flex min-w-0 items-center gap-3">
+                    <button type="button" onClick={onToggleSidePanel} className="grid size-7 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} aria-label={sidePanelOpen ? "收起左侧面板" : "展开左侧面板"}>
+                        {sidePanelOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}
+                    </button>
                     <Dropdown
                         trigger={["click"]}
                         menu={{
