@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Globe2, Home, ImageIcon, Images, Layers3, List, Menu, MessageSquare, Music2, PanelLeftClose, PanelLeftOpen, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
@@ -877,7 +877,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         const map = new Map<string, CanvasVideoResourceOption[]>();
         nodes.forEach((node) => {
             if (node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Config) return;
-            const options: CanvasVideoResourceOption[] = connections.flatMap((connection) => {
+            const options: CanvasVideoResourceOption[] = connections.flatMap<CanvasVideoResourceOption>((connection) => {
                 if (connection.toNodeId !== node.id) return [];
                 const source = nodeById.get(connection.fromNodeId);
                 if (!source) return [];
@@ -2563,6 +2563,17 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         targetIds.map(async (targetId) => {
                             try {
                                 const task = await createCanvasImageTask({ ...panoramaGenerationConfig, count: "1" }, panoramaPrompt, referenceImages, { nodeId: targetId, sourceId: projectId, clientTaskId: targetTaskIds[targetId] });
+                                if (task.image_url || task.url) {
+                                    setNodes((prev) => {
+                                        const root = prev.find((node) => node.id === rootId);
+                                        let next = applyCanvasImageTaskUpdate(prev, targetId, task, generationStartedAt, { width: panoramaNodeConfig.width, height: panoramaNodeConfig.height });
+                                        if (targetId !== rootId && root?.metadata?.primaryImageId === targetId) {
+                                            next = applyCanvasImageTaskUpdate(next, rootId, task, generationStartedAt, { width: panoramaNodeConfig.width, height: panoramaNodeConfig.height });
+                                        }
+                                        return next;
+                                    });
+                                    return true;
+                                }
                                 setNodes((prev) => {
                                     const root = prev.find((node) => node.id === rootId);
                                     return prev.map((node) => {
@@ -2704,6 +2715,17 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         targetIds.map(async (targetId) => {
                             try {
                                 const task = await createCanvasImageTask({ ...generationConfig, count: "1" }, requestPrompt, referenceImages, { nodeId: targetId, sourceId: projectId, clientTaskId: targetTaskIds[targetId] });
+                                if (task.image_url || task.url) {
+                                    setNodes((prev) => {
+                                        const root = prev.find((node) => node.id === rootId);
+                                        let next = applyCanvasImageTaskUpdate(prev, targetId, task, generationStartedAt, { width: imageSize.width, height: imageSize.height });
+                                        if (targetId !== rootId && root?.metadata?.primaryImageId === targetId) {
+                                            next = applyCanvasImageTaskUpdate(next, rootId, task, generationStartedAt, { width: imageSize.width, height: imageSize.height });
+                                        }
+                                        return next;
+                                    });
+                                    return true;
+                                }
                                 setNodes((prev) => {
                                     const root = prev.find((node) => node.id === rootId);
                                     return prev.map((node) => {
@@ -2882,7 +2904,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             }
 
             const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || ""));
-            const prompt = (isPanorama ? savedImageMetadata?.panoramaFinalPrompt : savedImageMetadata?.prompt || context?.prompt || "").trim();
+            const prompt = (isPanorama ? savedImageMetadata?.panoramaFinalPrompt || "" : savedImageMetadata?.prompt || context?.prompt || "").trim();
             const requestPrompt = isPanorama ? prompt : applyCameraPrompt(prompt, savedImageMetadata?.cameraControl || node.metadata?.cameraControl);
             if (!prompt) {
                 message.warning("找不到提示词，无法重试");
@@ -3045,14 +3067,18 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         [screenToCanvas, size.height, size.width],
     );
 
+    const insertAssetAtRef = useRef(insertAssetAt);
+    useLayoutEffect(() => {
+        insertAssetAtRef.current = insertAssetAt;
+    });
     const handleAssetInsert = useCallback(
         (payload: InsertAssetPayload) => {
             const position = assetInsertPositionRef.current || undefined;
             assetInsertPositionRef.current = null;
-            insertAssetAt(payload, position);
+            insertAssetAtRef.current(payload, position);
             setAssetPickerOpen(false);
         },
-        [insertAssetAt],
+        [],
     );
 
     const focusNode = useCallback(
@@ -3093,7 +3119,6 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     }, []);
 
     if (!projectLoaded) return <CanvasRefreshShell />;
-
     return (
         <main className="flex h-full min-h-0 overflow-hidden" style={{ background: theme.canvas.background, color: theme.node.text }}>
             <CanvasSidePanel
@@ -3562,7 +3587,7 @@ function FullscreenPreview({ src, alt, isPanorama, onClose, hasPrev, hasNext, on
         return () => el.removeEventListener("wheel", handleWheel);
     });
 
-    const handleWheel = (e: ReactWheelEvent) => {
+    const handleWheel = (e: WheelEvent) => {
         e.stopPropagation();
         e.preventDefault();
         setZoom((z) => {
@@ -4104,7 +4129,7 @@ function applyCanvasImageTaskUpdate(nodes: CanvasNodeData[], nodeId: string, tas
                 mimeType: task.mimeType || "image/png",
                 progress: 100,
                 imageTaskResultId: task.id,
-                panoramaProjection: isPanorama ? "equirectangular" : undefined,
+                panoramaProjection: isPanorama ? ("equirectangular" as const) : undefined,
             },
         };
     });
