@@ -256,12 +256,13 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 
 	var payload []byte
 	var status int
+	var responseContentType string
 	var imageURL string
 	var mimeType string
 	var bytes int64
 	for attempt := 0; attempt < 2; attempt++ {
 		var err error
-		payload, status, _, err = executeCanvasAIRequest(user, task.Endpoint, body, contentType, channelID, userChannelID)
+		payload, status, responseContentType, err = executeCanvasAIRequest(user, task.Endpoint, body, contentType, channelID, userChannelID)
 		if err != nil {
 			saveFailedCanvasImageTask(task, err.Error(), err.Error())
 			return
@@ -281,7 +282,7 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 			saveFailedCanvasImageTask(task, message, string(payload))
 			return
 		}
-		imageURL, mimeType, bytes, err = imageURLFromAIResponse(payload)
+		imageURL, mimeType, bytes, err = imageURLFromAIResponse(payload, responseContentType)
 		if err != nil {
 			if attempt == 0 && shouldRetryCanvasImageTaskFailure(status, payload, err) {
 				continue
@@ -553,11 +554,11 @@ func readWrappedTaskError(payload []byte) string {
 }
 
 func imageBytesFromAIResponse(payload []byte) ([]byte, string, error) {
-	var root any
-	if err := json.Unmarshal(payload, &root); err != nil {
+	candidates, err := imageCandidatesFromAIResponse(payload, "")
+	if err != nil {
 		return nil, "", err
 	}
-	for _, candidate := range collectImageCandidates(root, 0) {
+	for _, candidate := range candidates {
 		data, mimeType, err := imageCandidateBytes(candidate)
 		if err == nil && len(data) > 0 {
 			return data, mimeType, nil
@@ -566,16 +567,12 @@ func imageBytesFromAIResponse(payload []byte) ([]byte, string, error) {
 	return nil, "", errors.New("图片接口没有返回图片")
 }
 
-func imageURLFromAIResponse(payload []byte) (string, string, int64, error) {
-	var root any
-	if err := json.Unmarshal(payload, &root); err != nil {
-		if sseRoot, sseErr := imageResponseFromSSE(payload); sseErr == nil {
-			root = sseRoot
-		} else {
-			return "", "", 0, err
-		}
+func imageURLFromAIResponse(payload []byte, contentType string) (string, string, int64, error) {
+	candidates, err := imageCandidatesFromAIResponse(payload, contentType)
+	if err != nil {
+		return "", "", 0, err
 	}
-	for _, candidate := range collectImageCandidates(root, 0) {
+	for _, candidate := range candidates {
 		if strings.HasPrefix(candidate, "http://") || strings.HasPrefix(candidate, "https://") {
 			return candidate, "", 0, nil
 		}
@@ -591,48 +588,75 @@ func imageURLFromAIResponse(payload []byte) (string, string, int64, error) {
 	return "", "", 0, errors.New("图片接口没有返回图片")
 }
 
-func imageResponseFromSSE(payload []byte) (any, error) {
-	completed := []any{}
-	events := []any{}
-	for _, block := range splitSSEBlocks(string(payload)) {
-		data := sseBlockData(block)
+type serverSentJSONEvent struct {
+	name string
+	data any
+}
+
+func imageCandidatesFromAIResponse(payload []byte, contentType string) ([]string, error) {
+	if !isServerSentEventResponse(payload, contentType) {
+		var root any
+		if err := json.Unmarshal(payload, &root); err != nil {
+			return nil, err
+		}
+		return collectImageCandidates(root, 0), nil
+	}
+
+	events, err := parseServerSentJSONEvents(payload)
+	if err != nil {
+		return nil, err
+	}
+	var candidates []string
+	for index := len(events) - 1; index >= 0; index-- {
+		event := events[index]
+		encoded, _ := json.Marshal(event.data)
+		if message := readWrappedTaskError(encoded); message != "" {
+			return nil, errors.New(message)
+		}
+		if strings.EqualFold(event.name, "error") {
+			return nil, errors.New("图片流式接口返回错误")
+		}
+		candidates = append(candidates, collectImageCandidates(event.data, 0)...)
+	}
+	return candidates, nil
+}
+
+func isServerSentEventResponse(payload []byte, contentType string) bool {
+	if strings.Contains(strings.ToLower(contentType), "text/event-stream") {
+		return true
+	}
+	trimmed := bytes.TrimSpace(payload)
+	return bytes.HasPrefix(trimmed, []byte("event:")) || bytes.HasPrefix(trimmed, []byte("data:"))
+}
+
+func parseServerSentJSONEvents(payload []byte) ([]serverSentJSONEvent, error) {
+	normalized := strings.ReplaceAll(string(payload), "\r\n", "\n")
+	events := make([]serverSentJSONEvent, 0)
+	for _, block := range strings.Split(normalized, "\n\n") {
+		name := ""
+		dataLines := make([]string, 0)
+		for _, line := range strings.Split(block, "\n") {
+			switch {
+			case strings.HasPrefix(line, "event:"):
+				name = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			case strings.HasPrefix(line, "data:"):
+				dataLines = append(dataLines, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
+			}
+		}
+		data := strings.TrimSpace(strings.Join(dataLines, "\n"))
 		if data == "" || data == "[DONE]" {
 			continue
 		}
-		var event map[string]any
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
+		var decoded any
+		if err := json.Unmarshal([]byte(data), &decoded); err != nil {
 			return nil, err
 		}
-		events = append(events, event)
-		eventType := strings.TrimSpace(toStringSafe(event["type"]))
-		if eventType == "image_edit.completed" || eventType == "image_generation.completed" {
-			completed = append(completed, event)
-		}
+		events = append(events, serverSentJSONEvent{name: name, data: decoded})
 	}
-	if len(completed) > 0 {
-		return map[string]any{"data": completed}, nil
+	if len(events) == 0 {
+		return nil, errors.New("图片流式接口没有返回可解析事件")
 	}
-	if len(events) > 0 {
-		return map[string]any{"data": events}, nil
-	}
-	return nil, errors.New("SSE 响应没有数据")
-}
-
-func splitSSEBlocks(value string) []string {
-	value = strings.ReplaceAll(value, "\r\n", "\n")
-	value = strings.ReplaceAll(value, "\r", "\n")
-	return strings.Split(value, "\n\n")
-}
-
-func sseBlockData(block string) string {
-	lines := []string{}
-	for _, line := range strings.Split(block, "\n") {
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		lines = append(lines, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
-	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
+	return events, nil
 }
 
 func collectImageCandidates(value any, depth int) []string {
@@ -652,7 +676,7 @@ func collectImageCandidates(value any, depth int) []string {
 		}
 		return result
 	case map[string]any:
-		keys := []string{"url", "b64_json", "image_url", "image", "image_data", "base64", "result", "data", "output"}
+		keys := []string{"url", "b64_json", "partial_image_b64", "image_url", "image", "image_data", "base64", "result", "response", "data", "output"}
 		var result []string
 		for _, key := range keys {
 			result = append(result, collectImageCandidates(typed[key], depth+1)...)

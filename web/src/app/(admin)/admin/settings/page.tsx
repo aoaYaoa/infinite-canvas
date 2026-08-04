@@ -227,7 +227,7 @@ export default function AdminSettingsPage() {
             }
             setModelSelectExisting(current);
             setModelSelectSource(uniqueModels(channelModels));
-            setModelSelectSelected(uniqueModels([...current, ...channelModels]));
+            setModelSelectSelected(uniqueModels([...channelModels, ...current]));
             setModelSelectKeyword("");
             setModelSelectNewModel("");
             setModelSelectTab("new");
