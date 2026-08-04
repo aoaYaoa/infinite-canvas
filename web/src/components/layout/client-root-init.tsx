@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { App } from "antd";
 
 import { fetchUserConfig } from "@/services/api/user-config";
-import { defaultUserStorageProvider, saveUserStorageProvider } from "@/services/image-storage";
+import { defaultUserStorageProvider, defaultUserWebDAVStorageProvider, saveUserStorageProvider, saveUserWebDAVStorageProvider } from "@/services/image-storage";
 import { useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 
@@ -43,21 +43,26 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         if (!token || !user?.id) return;
         void fetchUserConfig(token)
             .then((payload) => {
-                const syncModel = payload.modelConfig?.syncModelConfig === true;
-                const syncStorage = payload.modelConfig?.syncStorageConfig === true;
+                const syncS3 = payload.modelConfig?.syncStorageConfig === true;
+                const syncWebDAV = payload.modelConfig?.syncWebDAVStorageConfig === true;
                 if (payload.modelConfig) {
                     Object.entries(payload.modelConfig)
-                        .filter(([key]) => syncModel || !["apiKey", "baseUrl", "localChannels"].includes(key))
                         .forEach(([key, value]) => updateConfig(key as keyof AiConfig, value as never));
-                } else {
-                    updateConfig("syncModelConfig", false);
                 }
-                updateConfig("syncStorageConfig", syncStorage);
-                if (syncStorage && payload.storageProvider) {
+                updateConfig("syncStorageConfig", syncS3);
+                updateConfig("syncWebDAVStorageConfig", syncWebDAV);
+                if (syncS3 && payload.storageProvider?.s3) {
                     saveUserStorageProvider({
                         ...defaultUserStorageProvider(),
-                        ...payload.storageProvider,
-                        enabled: payload.storageProvider.enabled !== undefined ? payload.storageProvider.enabled : true,
+                        ...payload.storageProvider.s3,
+                        type: "s3",
+                    });
+                }
+                if (syncWebDAV && payload.storageProvider?.webdav) {
+                    saveUserWebDAVStorageProvider({
+                        ...defaultUserWebDAVStorageProvider(),
+                        ...payload.storageProvider.webdav,
+                        type: "webdav",
                     });
                 }
             })

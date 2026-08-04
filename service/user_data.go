@@ -11,11 +11,11 @@ import (
 )
 
 type UserConfigPayload struct {
-	ModelConfig      json.RawMessage             `json:"modelConfig,omitempty"`
-	StorageProvider  *StorageObjectProviderInput `json:"storageProvider,omitempty"`
-	ImageHistory     json.RawMessage             `json:"imageHistory,omitempty"`
-	AssetData        json.RawMessage             `json:"assetData,omitempty"`
-	SyncCapabilities map[string]bool             `json:"syncCapabilities,omitempty"`
+	ModelConfig      json.RawMessage       `json:"modelConfig,omitempty"`
+	StorageProvider  *UserStorageProviders `json:"storageProvider,omitempty"`
+	ImageHistory     json.RawMessage       `json:"imageHistory,omitempty"`
+	AssetData        json.RawMessage       `json:"assetData,omitempty"`
+	SyncCapabilities map[string]bool       `json:"syncCapabilities,omitempty"`
 }
 
 type StorageObjectProviderInput struct {
@@ -29,6 +29,13 @@ type StorageObjectProviderInput struct {
 	SecretAccessKey string `json:"secretAccessKey"`
 	PublicBaseURL   string `json:"publicBaseUrl"`
 	PathPrefix      string `json:"pathPrefix"`
+	Username        string `json:"username"`
+	Password        string `json:"password"`
+}
+
+type UserStorageProviders struct {
+	S3     *StorageObjectProviderInput `json:"s3,omitempty"`
+	WebDAV *StorageObjectProviderInput `json:"webdav,omitempty"`
 }
 
 type userModelConfigInput struct {
@@ -140,9 +147,20 @@ func CurrentUserConfig(ctx context.Context) (UserConfigPayload, error) {
 		result.ModelConfig = json.RawMessage(config.ModelConfig)
 	}
 	if strings.TrimSpace(config.StorageProvider) != "" {
-		var provider StorageObjectProviderInput
-		if err := json.Unmarshal([]byte(config.StorageProvider), &provider); err == nil {
-			result.StorageProvider = &provider
+		providers := readUserStorageProviders(config.StorageProvider)
+		var syncFlags struct {
+			SyncStorageConfig       bool `json:"syncStorageConfig"`
+			SyncWebDAVStorageConfig bool `json:"syncWebDAVStorageConfig"`
+		}
+		_ = json.Unmarshal(result.ModelConfig, &syncFlags)
+		if !syncFlags.SyncStorageConfig {
+			providers.S3 = nil
+		}
+		if !syncFlags.SyncWebDAVStorageConfig {
+			providers.WebDAV = nil
+		}
+		if providers.S3 != nil || providers.WebDAV != nil {
+			result.StorageProvider = &providers
 		}
 	}
 	if strings.TrimSpace(config.ImageHistory) != "" {
@@ -152,6 +170,14 @@ func CurrentUserConfig(ctx context.Context) (UserConfigPayload, error) {
 		result.AssetData = json.RawMessage(config.AssetData)
 	}
 	return result, nil
+}
+
+func readUserStorageProviders(raw string) UserStorageProviders {
+	var providers UserStorageProviders
+	if strings.TrimSpace(raw) != "" {
+		_ = json.Unmarshal([]byte(raw), &providers)
+	}
+	return providers
 }
 
 func SaveCurrentUserModelConfig(ctx context.Context, raw json.RawMessage) (UserConfigPayload, error) {

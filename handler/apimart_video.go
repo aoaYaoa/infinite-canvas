@@ -560,7 +560,12 @@ func normalizeAPIMartImageCount(payload map[string]any, config apimartInputConfi
 func applyAPIMartVideoDefaults(payload map[string]any, modelName string) {
 	model := normalizeAPIMartModelName(modelName)
 	if model == "minimax-h3" {
-		payload["resolution"] = "2K"
+		switch toStringSafe(payload["resolution"]) {
+		case "480p", "720p", "768p":
+			payload["resolution"] = "768P"
+		default:
+			payload["resolution"] = "2K"
+		}
 		if !isEmptyValue(payload["duration"]) {
 			duration := normalizeAPIMartInt(payload["duration"])
 			if duration < 4 {
@@ -1669,7 +1674,7 @@ func normalizeAPIMartSizeRatio(width int, height int) string {
 		if diff < 0 {
 			diff = -diff
 		}
-		if diff*100 <= width*item.height {
+		if diff*100 <= width*item.height*4 {
 			return item.ratio
 		}
 	}

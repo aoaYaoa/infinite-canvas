@@ -485,6 +485,19 @@ func normalizeKIEHailuoVideoResolution(value string) string {
 	}
 }
 
+func normalizeKIEMiniMaxH3VideoResolution(value string) string {
+	value = strings.ReplaceAll(strings.TrimSpace(value), " ", "")
+
+	switch strings.ToLower(value) {
+	case "480", "480p", "720", "720p", "768", "768p":
+		return "768P"
+	case "1080", "1080p", "2k", "2048", "2048p":
+		return "2K"
+	default:
+		return value
+	}
+}
+
 func normalizeKIEImageQuality(modelName string, value any) string {
 	quality := strings.ToLower(strings.TrimSpace(toStringSafe(value)))
 	model := strings.ToLower(strings.TrimSpace(modelName))
@@ -655,6 +668,10 @@ func normalizeKIEKlingV3Elements(value any) []map[string]any {
 
 func applyKIEModelDefaults(input map[string]any, modelName string) {
 	switch strings.ToLower(strings.TrimSpace(modelName)) {
+	case "minimax-h3/text-to-video":
+		if _, ok := input["aspect_ratio"]; !ok {
+			input["aspect_ratio"] = "16:9"
+		}
 	case "kling-2.6/text-to-video", "kling-2.6/image-to-video":
 		if _, ok := input["sound"]; !ok {
 			input["sound"] = false
@@ -845,9 +862,9 @@ func kieModelInputConfig(modelName string) kieInputConfig {
 		"happyhorse-1-1/image-to-video":     {durationKind: "number", hasResolution: true, imageRefField: "image_urls", imageRefKind: "single_array"},
 		"happyhorse-1-1/reference-to-video": {aspectField: "aspect_ratio", durationKind: "number", hasResolution: true, imageRefField: "reference_image", imageRefKind: "array"},
 
-		"minimax-h3/text-to-video":           {aspectField: "aspect_ratio", durationKind: "number", durationMin: 4, durationMax: 15},
-		"minimax-h3/image-to-video":          {durationKind: "number", durationMin: 4, durationMax: 15, imageRefField: "first_frame_url", imageRefKind: "single"},
-		"minimax-h3/reference-to-video":      {aspectField: "aspect_ratio", durationKind: "number", durationMin: 4, durationMax: 15, imageRefField: "reference_image_urls", imageRefKind: "array", videoRefField: "reference_video_urls", videoRefKind: "array", audioRefField: "reference_audio_urls", audioRefKind: "array"},
+		"minimax-h3/text-to-video":           {aspectField: "aspect_ratio", durationKind: "number", durationMin: 4, durationMax: 15, hasResolution: true, resolutionKind: "minimax_h3_video"},
+		"minimax-h3/image-to-video":          {durationKind: "number", durationMin: 4, durationMax: 15, hasResolution: true, resolutionKind: "minimax_h3_video", imageRefField: "first_frame_url", imageRefKind: "single"},
+		"minimax-h3/reference-to-video":      {aspectField: "aspect_ratio", durationKind: "number", durationMin: 4, durationMax: 15, hasResolution: true, resolutionKind: "minimax_h3_video", imageRefField: "reference_image_urls", imageRefKind: "array", videoRefField: "reference_video_urls", videoRefKind: "array", audioRefField: "reference_audio_urls", audioRefKind: "array"},
 		"hailuo/02-image-to-video-standard":  {durationKind: "string", hasResolution: true, resolutionKind: "hailuo_video", imageRefField: "image_url", imageRefKind: "single"},
 		"hailuo/02-image-to-video-pro":       {durationKind: "string", hasResolution: true, resolutionKind: "hailuo_video", imageRefField: "image_url", imageRefKind: "single"},
 		"hailuo/02-text-to-video-standard":   {durationKind: "string"},

@@ -54,6 +54,22 @@ const seedancePixels = {
         "9:16": "1080x1920",
         "21:9": "2206x946",
     },
+    "2k": {
+        "16:9": "2560x1440",
+        "4:3": "2224x1668",
+        "1:1": "1920x1920",
+        "3:4": "1668x2224",
+        "9:16": "1440x2560",
+        "21:9": "2940x1260",
+    },
+    "4k": {
+        "16:9": "3840x2160",
+        "4:3": "3328x2496",
+        "1:1": "2880x2880",
+        "3:4": "2496x3328",
+        "9:16": "2160x3840",
+        "21:9": "4412x1892",
+    },
 } as const;
 
 export function isSeedanceVideoConfig(config: Pick<AiConfig, "model" | "videoModel" | "baseUrl">) {
@@ -114,7 +130,8 @@ export function normalizeSeedanceRatio(value: string) {
 }
 
 export function seedancePixelLabel(resolution: string, ratio: string) {
-    const normalizedResolution = normalizeSeedanceResolution(resolution) as keyof typeof seedancePixels;
+    const resolutionKey = resolution.trim().toLowerCase();
+    const normalizedResolution = (resolutionKey in seedancePixels ? resolutionKey : normalizeSeedanceResolution(resolution)) as keyof typeof seedancePixels;
     const normalizedRatio = normalizeSeedanceRatio(ratio) as keyof (typeof seedancePixels)[typeof normalizedResolution] | "adaptive";
     if (normalizedRatio === "adaptive") return "自动匹配";
     return seedancePixels[normalizedResolution][normalizedRatio] || "";

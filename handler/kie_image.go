@@ -863,6 +863,9 @@ func normalizeKIEResolutionValue(value string, resolutionKind string) string {
 	if resolutionKind == "hailuo_video" {
 		return normalizeKIEHailuoVideoResolution(value)
 	}
+	if resolutionKind == "minimax_h3_video" {
+		return normalizeKIEMiniMaxH3VideoResolution(value)
+	}
 	if resolutionKind == "image" {
 		return normalizeKIEImageResolution(value)
 	}
