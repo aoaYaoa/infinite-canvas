@@ -70,8 +70,8 @@ export type AiConfig = {
     };
     localChannels: LocalModelChannel[];
     publicChannels: Array<{ id?: string; name?: string; baseUrl?: string; models?: string[]; weight?: number; timeout?: number; enabled?: boolean; remark?: string }>;
-    syncModelConfig: boolean;
     syncStorageConfig: boolean;
+    syncWebDAVStorageConfig: boolean;
     activeChannelId: string;
     imageChannelId: string;
     videoChannelId: string;
@@ -132,8 +132,8 @@ export const defaultConfig: AiConfig = {
     },
     localChannels: [],
     publicChannels: [],
-    syncModelConfig: false,
     syncStorageConfig: false,
+    syncWebDAVStorageConfig: false,
     activeChannelId: "",
     imageChannelId: "",
     videoChannelId: "",
@@ -362,8 +362,8 @@ export const useConfigStore = create<ConfigStore>()(
                         textChannelId: config.textChannelId || localChannels[0]?.id || "",
                         audioChannelId: config.audioChannelId || localChannels[0]?.id || "",
                         activeChannelId: config.activeChannelId || "",
-                        syncModelConfig: config.syncModelConfig === true,
                         syncStorageConfig: config.syncStorageConfig === true,
+                        syncWebDAVStorageConfig: config.syncWebDAVStorageConfig === true,
                         channelMode: config.channelMode || "remote",
                         imageModel: config.imageModel || config.model,
                         videoModel: config.videoModel || "grok-imagine-video",

@@ -7,6 +7,9 @@ type SettingKey string
 const (
 	SettingKeyPublic  SettingKey = "public"
 	SettingKeyPrivate SettingKey = "private"
+
+	StorageProviderTypeS3     = "s3"
+	StorageProviderTypeWebDAV = "webdav"
 )
 
 // ModelChannel 模型渠道配置。
@@ -126,6 +129,8 @@ type StorageProvider struct {
 	SecretAccessKey   string `json:"secretAccessKey"`
 	PublicBaseURL     string `json:"publicBaseUrl"`
 	PathPrefix        string `json:"pathPrefix"`
+	Username          string `json:"username"`
+	Password          string `json:"password"`
 	Weight            int    `json:"weight"`
 	Enabled           bool   `json:"enabled"`
 	OwnerUserID       string `json:"ownerUserId"`

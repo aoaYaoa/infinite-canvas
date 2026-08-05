@@ -52,6 +52,9 @@ func SaveSettings(settings model.Settings) (model.Settings, error) {
 	keepPrivateAPIKeys(&settings, normalizeSettings(saved))
 	keepPrivateAuthSecrets(&settings, normalizeSettings(saved))
 	keepPrivateStorageSecrets(&settings, normalizeSettings(saved))
+	if err := validateEnabledStorageProviderTypes(settings.Private.Storage.Providers); err != nil {
+		return model.Settings{}, err
+	}
 	result, err := repository.SaveSettings(settings, now())
 	if err == nil {
 		RefreshPromptSyncScheduler()
@@ -236,6 +239,7 @@ func hidePrivateAPIKeys(settings model.Settings) model.Settings {
 	}
 	for i := range settings.Private.Storage.Providers {
 		settings.Private.Storage.Providers[i].SecretAccessKey = ""
+		settings.Private.Storage.Providers[i].Password = ""
 	}
 	settings.Private.Auth.LinuxDo.ClientSecret = ""
 	return settings
@@ -734,11 +738,17 @@ func (err safeMessageError) SafeMessage() string {
 
 func keepPrivateStorageSecrets(settings *model.Settings, saved model.Settings) {
 	for i := range settings.Private.Storage.Providers {
-		if strings.TrimSpace(settings.Private.Storage.Providers[i].SecretAccessKey) != "" {
+		current := &settings.Private.Storage.Providers[i]
+		if strings.TrimSpace(current.SecretAccessKey) != "" && strings.TrimSpace(current.Password) != "" {
 			continue
 		}
-		if provider, ok := findSavedStorageProvider(settings.Private.Storage.Providers[i], saved.Private.Storage.Providers, i); ok {
-			settings.Private.Storage.Providers[i].SecretAccessKey = provider.SecretAccessKey
+		if provider, ok := findSavedStorageProvider(*current, saved.Private.Storage.Providers, i); ok {
+			if strings.TrimSpace(current.SecretAccessKey) == "" {
+				current.SecretAccessKey = provider.SecretAccessKey
+			}
+			if strings.TrimSpace(current.Password) == "" {
+				current.Password = provider.Password
+			}
 		}
 	}
 }
@@ -748,14 +758,34 @@ func findSavedStorageProvider(provider model.StorageProvider, saved []model.Stor
 		if provider.ID != "" && item.ID == provider.ID {
 			return item, true
 		}
-		if item.Name == provider.Name && item.Endpoint == provider.Endpoint && item.Bucket == provider.Bucket {
+		if item.Type == provider.Type && item.Name == provider.Name && item.Endpoint == provider.Endpoint && item.Bucket == provider.Bucket && (provider.Type != model.StorageProviderTypeWebDAV || item.PathPrefix == provider.PathPrefix) {
 			return item, true
 		}
 	}
-	if index >= 0 && index < len(saved) {
+	if index >= 0 && index < len(saved) && saved[index].Type == provider.Type {
 		return saved[index], true
 	}
 	return model.StorageProvider{}, false
+}
+
+func validateEnabledStorageProviderTypes(providers []model.StorageProvider) error {
+	enabledType := ""
+	for _, provider := range providers {
+		if provider.Type != model.StorageProviderTypeS3 && provider.Type != model.StorageProviderTypeWebDAV {
+			return safeMessageError{message: "存储类型不支持"}
+		}
+		if !provider.Enabled {
+			continue
+		}
+		if enabledType == "" {
+			enabledType = provider.Type
+			continue
+		}
+		if enabledType != provider.Type {
+			return safeMessageError{message: "S3/R2 与 WebDAV 不能同时启用"}
+		}
+	}
+	return nil
 }
 
 func normalizePrivateStorageSetting(setting model.PrivateStorageSetting) model.PrivateStorageSetting {
@@ -789,13 +819,21 @@ func normalizeStorageCapacityCheckSetting(setting model.StorageCapacityCheckSett
 
 func normalizeStorageProvider(provider model.StorageProvider) model.StorageProvider {
 	provider.Name = strings.TrimSpace(provider.Name)
+	provider.Type = strings.ToLower(strings.TrimSpace(provider.Type))
+	if provider.Type == "" {
+		provider.Type = model.StorageProviderTypeS3
+	}
 	provider.Endpoint = strings.TrimRight(strings.TrimSpace(provider.Endpoint), "/")
 	provider.Bucket = strings.TrimSpace(provider.Bucket)
 	provider.AccessKeyID = strings.TrimSpace(provider.AccessKeyID)
-	if provider.Type == "" {
-		provider.Type = "s3"
+	if provider.Type == model.StorageProviderTypeWebDAV {
+		provider.PathPrefix = strings.Trim(strings.TrimSpace(provider.PathPrefix), "/")
+		if provider.PathPrefix == "" {
+			provider.PathPrefix = "canvas"
+		}
 	}
-	if provider.Region == "" {
+	provider.Username = strings.TrimSpace(provider.Username)
+	if provider.Type == model.StorageProviderTypeS3 && provider.Region == "" {
 		provider.Region = "auto"
 	}
 	if provider.ID == "" {
@@ -808,7 +846,11 @@ func normalizeStorageProvider(provider model.StorageProvider) model.StorageProvi
 }
 
 func stableStorageProviderID(provider model.StorageProvider) string {
-	return "storage-" + providerSecureHash([]string{provider.OwnerUserID, provider.Name, provider.Endpoint, provider.Bucket})
+	webDAVPath := ""
+	if provider.Type == model.StorageProviderTypeWebDAV {
+		webDAVPath = provider.PathPrefix
+	}
+	return "storage-" + providerSecureHash([]string{provider.OwnerUserID, provider.Type, provider.Name, provider.Endpoint, provider.Bucket, webDAVPath})
 }
 
 func stableModelChannelID(channel model.ModelChannel) string {

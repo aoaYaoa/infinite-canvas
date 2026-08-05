@@ -484,8 +484,8 @@ function parseVideoDimensions(size: string) {
 function normalizeVideoResolution(value: string) {
     if (value === "low") return "480p";
     if (value === "auto" || value === "high" || value === "medium") return "720p";
-    const resolution = value.replace(/p$/i, "") || "720";
-    return `${resolution}p`;
+    const resolution = value.trim().replace(/p$/i, "") || "720";
+    return /k$/i.test(resolution) ? resolution.toLowerCase() : `${resolution}p`;
 }
 
 function unwrapVideoResponse(payload: ApiVideoResponse): VideoResponse {

@@ -16,11 +16,14 @@ export type UploadedImage = {
     mimeType: string;
 };
 
-export type UserStorageProvider = {
+type UserStorageProviderBase = {
     enabled: boolean;
     name: string;
-    type: "s3";
     endpoint: string;
+};
+
+export type UserS3StorageProvider = UserStorageProviderBase & {
+    type: "s3";
     region: string;
     bucket: string;
     accessKeyId: string;
@@ -28,6 +31,15 @@ export type UserStorageProvider = {
     publicBaseUrl: string;
     pathPrefix: string;
 };
+
+export type UserWebDAVStorageProvider = UserStorageProviderBase & {
+    type: "webdav";
+    pathPrefix: string;
+    username: string;
+    password: string;
+};
+
+export type UserStorageProvider = UserS3StorageProvider | UserWebDAVStorageProvider;
 
 type UploadImageOptions = {
     localOnly?: boolean;
@@ -43,6 +55,7 @@ const store = localforage.createInstance({ name: "infinite-canvas", storeName: "
 const objectUrls = new Map<string, string>();
 const serverUrls = new Map<string, string>();
 export const USER_STORAGE_PROVIDER_KEY = "infinite-canvas:user_storage_provider";
+export const USER_WEBDAV_STORAGE_PROVIDER_KEY = "infinite-canvas:user_webdav_storage_provider";
 let storageConfigPromise: Promise<StorageConfig> | null = null;
 
 export function canUseGlobalStorage(config: StorageConfig) {
@@ -308,7 +321,7 @@ export function collectImageStorageKeys(value: unknown, keys = new Set<string>()
     return keys;
 }
 
-export function defaultUserStorageProvider(): UserStorageProvider {
+export function defaultUserStorageProvider(): UserS3StorageProvider {
     return {
         enabled: false,
         name: "我的 R2",
@@ -323,25 +336,79 @@ export function defaultUserStorageProvider(): UserStorageProvider {
     };
 }
 
-export function loadUserStorageProvider() {
+export function defaultUserWebDAVStorageProvider(): UserWebDAVStorageProvider {
+    return {
+        enabled: false,
+        name: "我的 WebDAV",
+        type: "webdav",
+        endpoint: "",
+        pathPrefix: "canvas",
+        username: "",
+        password: "",
+    };
+}
+
+export function loadUserS3StorageProvider() {
     if (typeof window === "undefined") return null;
     try {
-        const parsed = JSON.parse(window.localStorage.getItem(USER_STORAGE_PROVIDER_KEY) || "null") as UserStorageProvider | null;
-        if (!parsed?.enabled || !parsed.endpoint || !parsed.bucket || !parsed.accessKeyId || !parsed.secretAccessKey) return null;
-        return { ...defaultUserStorageProvider(), ...parsed };
+        const parsed = JSON.parse(window.localStorage.getItem(USER_STORAGE_PROVIDER_KEY) || "null") as UserS3StorageProvider | null;
+        return parsed ? { ...defaultUserStorageProvider(), ...parsed, type: "s3" as const } : null;
     } catch {
         return null;
     }
 }
 
-export function saveUserStorageProvider(provider: UserStorageProvider) {
-    window.localStorage.setItem(USER_STORAGE_PROVIDER_KEY, JSON.stringify({ ...defaultUserStorageProvider(), ...provider }));
+export function loadUserWebDAVStorageProvider() {
+    if (typeof window === "undefined") return null;
+    try {
+        const parsed = JSON.parse(window.localStorage.getItem(USER_WEBDAV_STORAGE_PROVIDER_KEY) || "null") as UserWebDAVStorageProvider | null;
+        return parsed ? { ...defaultUserWebDAVStorageProvider(), ...parsed, type: "webdav" as const } : null;
+    } catch {
+        return null;
+    }
 }
 
-function toProviderPayload(provider: UserStorageProvider) {
+export function loadUserStorageProvider(): UserStorageProvider | null {
+    const s3 = loadUserS3StorageProvider();
+    const webdav = loadUserWebDAVStorageProvider();
+    if (s3?.enabled && webdav?.enabled) return null;
+    if (s3?.enabled && validS3Provider(s3)) return s3;
+    if (webdav?.enabled && validWebDAVProvider(webdav)) return webdav;
+    return null;
+}
+
+export function saveUserStorageProvider(provider: UserS3StorageProvider) {
+    window.localStorage.setItem(USER_STORAGE_PROVIDER_KEY, JSON.stringify({ ...defaultUserStorageProvider(), ...provider, type: "s3" }));
+}
+
+export function saveUserWebDAVStorageProvider(provider: UserWebDAVStorageProvider) {
+    window.localStorage.setItem(USER_WEBDAV_STORAGE_PROVIDER_KEY, JSON.stringify({ ...defaultUserWebDAVStorageProvider(), ...provider, type: "webdav" }));
+}
+
+function validS3Provider(provider: UserS3StorageProvider) {
+    return Boolean(provider.endpoint && provider.bucket && provider.accessKeyId && provider.secretAccessKey);
+}
+
+function validWebDAVProvider(provider: UserWebDAVStorageProvider) {
+    return Boolean(provider.endpoint && provider.username && provider.password);
+}
+
+export function toProviderPayload(provider: UserStorageProvider) {
+    if (provider.type === "webdav") {
+        return {
+            enabled: provider.enabled,
+            name: provider.name,
+            type: "webdav" as const,
+            endpoint: provider.endpoint,
+            pathPrefix: provider.pathPrefix,
+            username: provider.username,
+            password: provider.password,
+        };
+    }
     return {
+        enabled: provider.enabled,
         name: provider.name,
-        type: provider.type || "s3",
+        type: "s3" as const,
         endpoint: provider.endpoint,
         region: provider.region || "auto",
         bucket: provider.bucket,

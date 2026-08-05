@@ -1,10 +1,13 @@
 import { apiDelete, apiGet, apiPost } from "@/services/api/request";
 import type { AiConfig } from "@/stores/use-config-store";
-import type { UserStorageProvider } from "@/services/image-storage";
+import { toProviderPayload, type UserS3StorageProvider, type UserStorageProvider, type UserWebDAVStorageProvider } from "@/services/image-storage";
 
 export type UserConfigPayload = {
     modelConfig?: Partial<AiConfig>;
-    storageProvider?: Partial<UserStorageProvider>;
+    storageProvider?: {
+        s3?: Partial<UserS3StorageProvider>;
+        webdav?: Partial<UserWebDAVStorageProvider>;
+    };
     imageHistory?: unknown;
     assetData?: unknown;
     syncCapabilities?: {
@@ -30,12 +33,22 @@ export async function syncUserModelConfig(token: string, config: AiConfig) {
     return apiPost<UserConfigPayload>("/api/v1/user-config/model", { config }, token);
 }
 
-export async function syncUserStorageProvider(token: string, provider: UserStorageProvider) {
-    return apiPost<UserConfigPayload>("/api/v1/user-config/storage", { provider: toStorageProviderPayload(provider) }, token);
+export type UserStorageProviders = {
+    s3?: UserS3StorageProvider;
+    webdav?: UserWebDAVStorageProvider;
+};
+
+export async function syncUserStorageProvider(token: string, provider: UserStorageProviders) {
+    return apiPost<UserConfigPayload>("/api/v1/user-config/storage", {
+        provider: {
+            ...(provider.s3 ? { s3: toProviderPayload(provider.s3) } : {}),
+            ...(provider.webdav ? { webdav: toProviderPayload(provider.webdav) } : {}),
+        },
+    }, token);
 }
 
 export async function measureUserStorageProvider(token: string, provider: UserStorageProvider) {
-    return apiPost<StorageCapacityResult>("/api/v1/storage/measure", { provider: toStorageProviderPayload(provider) }, token);
+    return apiPost<StorageCapacityResult>("/api/v1/storage/measure", { provider: toProviderPayload(provider) }, token);
 }
 
 export async function fetchUserImageHistory<T>(token: string) {
@@ -100,19 +113,4 @@ export async function draftUserWorkflow<T>(
     },
 ) {
     return apiPost<WorkflowAgentDraftResponse<T>>("/api/v1/workflows/agent-draft", payload, token);
-}
-
-function toStorageProviderPayload(provider: UserStorageProvider) {
-    return {
-        enabled: provider.enabled,
-        name: provider.name,
-        type: provider.type || "s3",
-        endpoint: provider.endpoint,
-        region: provider.region || "auto",
-        bucket: provider.bucket,
-        accessKeyId: provider.accessKeyId,
-        secretAccessKey: provider.secretAccessKey,
-        publicBaseUrl: provider.publicBaseUrl,
-        pathPrefix: provider.pathPrefix,
-    };
 }

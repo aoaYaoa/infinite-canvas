@@ -45,7 +45,8 @@ const emptySettings: AdminSettings = {
     private: { channels: [], promptSync: { enabled: true, cron: "0 0 * * *" }, aiLog: { localDirectReportEnabled: false, cleanup: { enabled: false, retentionDays: 14, cron: "0 3 * * *" } }, auth: { linuxDo: { clientId: "", clientSecret: "" } }, storage: { mode: "local_indexeddb", allowUserProvider: false, allowUserGlobalProvider: true, providers: [], roundRobinCursor: 0, capacityCheck: { enabled: false, cron: "0 */6 * * *" }, capacityLimitBytes: 9 * 1024 * 1024 * 1024 } },
 };
 const emptyChannel: AdminModelChannel = { id: "", protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, timeout: 600, enabled: true, remark: "" };
-const emptyStorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "canvas", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
+const emptyS3StorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "canvas", username: "", password: "", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
+const emptyWebDAVStorageProvider: AdminStorageProvider = { ...emptyS3StorageProvider, name: "", type: "webdav", region: "" };
 
 type SettingsTabKey = "public" | "private";
 type EditorMode = "visual" | "json";
@@ -81,6 +82,7 @@ export default function AdminSettingsPage() {
     const [modelCosts, setModelCosts] = useState<AdminModelCost[]>([]);
     const [knownModels, setKnownModels] = useState<string[]>([]);
     const publicModels = Form.useWatch(["public", "modelChannel", "availableModels"], form) || [];
+    const storageProviders = Form.useWatch(["private", "storage", "providers"], form) || [];
     const channelModels = useMemo(() => collectChannelModels(channels), [channels]);
     const channelTableData = useMemo(() => channels.map((channel, index) => ({ ...channel, _index: index, _rowKey: `${index}-${channel.name}-${channel.baseUrl}` })), [channels]);
     const activeMode = editorMode[activeTab];
@@ -633,7 +635,7 @@ export default function AdminSettingsPage() {
                                             </Form.Item>
                                         </Col>
                                         <Col xs={24} md={8}>
-                                            <Form.Item name={["private", "storage", "allowUserProvider"]} label="允许用户配置 S3" valuePropName="checked">
+                                            <Form.Item name={["private", "storage", "allowUserProvider"]} label="允许用户配置 S3/WebDAV" valuePropName="checked">
                                                 <Switch />
                                             </Form.Item>
                                         </Col>
@@ -661,92 +663,134 @@ export default function AdminSettingsPage() {
                                     <Form.List name={["private", "storage", "providers"]}>
                                         {(fields, { add, remove }) => (
                                             <Flex vertical gap={12}>
-                                                <Button icon={<PlusOutlined />} onClick={() => add({ ...emptyStorageProvider })}>
+                                                <Button icon={<PlusOutlined />} onClick={() => add(newAdminStorageProvider("s3", storageProviders))}>
                                                     新增 S3/R2 配置
                                                 </Button>
-                                                {fields.map((field) => (
-                                                    <Card
-                                                        key={field.key}
-                                                        size="small"
-                                                        title={`对象存储 ${field.name + 1}`}
-                                                        extra={
-                                                            <Flex gap={8}>
-                                                                <Button size="small" loading={measuringProviderIndex === field.name} onClick={() => void measureStorageProviderAt(field.name)}>
-                                                                    统计容量
-                                                                </Button>
-                                                                <Button danger size="small" icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
-                                                            </Flex>
-                                                        }
-                                                    >
-                                                        <Row gutter={12}>
-                                                            <Col xs={24} md={6}>
-                                                                <Form.Item name={[field.name, "name"]} label="名称">
-                                                                    <Input placeholder="Cloudflare R2" />
-                                                                </Form.Item>
-                                                            </Col>
-                                                            <Col xs={24} md={6}>
-                                                                <Form.Item name={[field.name, "endpoint"]} label="Endpoint">
-                                                                    <Input placeholder="https://<account>.r2.cloudflarestorage.com" />
-                                                                </Form.Item>
-                                                            </Col>
-                                                            <Col xs={24} md={4}>
-                                                                <Form.Item name={[field.name, "region"]} label="Region">
-                                                                    <Input placeholder="auto" />
-                                                                </Form.Item>
-                                                            </Col>
-                                                            <Col xs={24} md={4}>
-                                                                <Form.Item name={[field.name, "bucket"]} label="Bucket">
-                                                                    <Input />
-                                                                </Form.Item>
-                                                            </Col>
-                                                            <Col xs={24} md={4}>
-                                                                <Form.Item name={[field.name, "enabled"]} label="启用" valuePropName="checked">
-                                                                    <Switch />
-                                                                </Form.Item>
-                                                            </Col>
-                                                            <Col xs={24} md={6}>
-                                                                <Form.Item name={[field.name, "accessKeyId"]} label="Access Key ID">
-                                                                    <Input />
-                                                                </Form.Item>
-                                                            </Col>
-                                                            <Col xs={24} md={6}>
-                                                                <Form.Item name={[field.name, "secretAccessKey"]} label="Secret Access Key">
-                                                                    <Input.Password placeholder="留空沿用已保存密钥" />
-                                                                </Form.Item>
-                                                            </Col>
-                                                            <Col xs={24} md={6}>
-                                                                <Form.Item name={[field.name, "publicBaseUrl"]} label="公开访问域名">
-                                                                    <Input placeholder="可选，不填则走后端代理读取" />
-                                                                </Form.Item>
-                                                            </Col>
-                                                            <Col xs={24} md={3}>
-                                                                <Form.Item name={[field.name, "pathPrefix"]} label="路径前缀">
-                                                                    <Input placeholder="canvas" />
-                                                                </Form.Item>
-                                                            </Col>
-                                                            <Col xs={24} md={3}>
-                                                                <Form.Item name={[field.name, "weight"]} label="权重">
-                                                                    <InputNumber min={1} className="!w-full" />
-                                                                </Form.Item>
-                                                            </Col>
-                                                            <Col xs={24} md={4}>
-                                                                <Form.Item label="已用容量">
-                                                                    <Typography.Text>{formatStorageBytes(form.getFieldValue(["private", "storage", "providers", field.name, "capacityBytes"]) || 0)}</Typography.Text>
-                                                                </Form.Item>
-                                                            </Col>
-                                                            <Col xs={24} md={5}>
-                                                                <Form.Item name={[field.name, "capacityCheckedAt"]} label="统计时间">
-                                                                    <Input disabled />
-                                                                </Form.Item>
-                                                            </Col>
-                                                            <Col xs={24} md={3}>
-                                                                <Form.Item name={[field.name, "capacityExceeded"]} label="超限" valuePropName="checked">
-                                                                    <Switch disabled />
-                                                                </Form.Item>
-                                                            </Col>
-                                                        </Row>
-                                                    </Card>
-                                                ))}
+                                                <Button icon={<PlusOutlined />} onClick={() => add(newAdminStorageProvider("webdav", storageProviders))}>
+                                                    新增 WebDAV 配置
+                                                </Button>
+                                                {fields.map((field) => {
+                                                    const provider = storageProviders[field.name] || emptyS3StorageProvider;
+                                                    const isWebDAV = provider.type === "webdav";
+                                                    const blockedByOtherType = storageProviders.some((item: AdminStorageProvider, index: number) => index !== field.name && item.enabled && item.type !== provider.type);
+                                                    const weightField = (
+                                                        <Col xs={24} md={3}>
+                                                            <Form.Item name={[field.name, "weight"]} label="权重">
+                                                                <InputNumber min={1} className="!w-full" />
+                                                            </Form.Item>
+                                                        </Col>
+                                                    );
+                                                    return (
+                                                        <Card
+                                                            key={field.key}
+                                                            size="small"
+                                                            title={isWebDAV ? "WebDAV" : "S3/R2"}
+                                                            extra={
+                                                                <Flex gap={8}>
+                                                                    <Button size="small" loading={measuringProviderIndex === field.name} onClick={() => void measureStorageProviderAt(field.name)}>
+                                                                        统计容量
+                                                                    </Button>
+                                                                    <Button danger size="small" icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                                                                </Flex>
+                                                            }
+                                                        >
+                                                            <Form.Item name={[field.name, "type"]} hidden>
+                                                                <Input />
+                                                            </Form.Item>
+                                                            <Row gutter={12}>
+                                                                <Col xs={24} md={6}>
+                                                                    <Form.Item name={[field.name, "name"]} label="名称">
+                                                                        <Input placeholder={isWebDAV ? "WebDAV" : "Cloudflare R2"} />
+                                                                    </Form.Item>
+                                                                </Col>
+                                                                <Col xs={24} md={isWebDAV ? 8 : 6}>
+                                                                    <Form.Item name={[field.name, "endpoint"]} label={isWebDAV ? "WebDAV 地址" : "Endpoint"}>
+                                                                        <Input placeholder={isWebDAV ? "https://dav.example.com/webdav" : "https://<account>.r2.cloudflarestorage.com"} />
+                                                                    </Form.Item>
+                                                                </Col>
+                                                                {!isWebDAV && (
+                                                                    <>
+                                                                        <Col xs={24} md={4}>
+                                                                            <Form.Item name={[field.name, "region"]} label="Region">
+                                                                                <Input placeholder="auto" />
+                                                                            </Form.Item>
+                                                                        </Col>
+                                                                        <Col xs={24} md={4}>
+                                                                            <Form.Item name={[field.name, "bucket"]} label="Bucket">
+                                                                                <Input />
+                                                                            </Form.Item>
+                                                                        </Col>
+                                                                    </>
+                                                                )}
+                                                                <Col xs={24} md={4}>
+                                                                    <Form.Item name={[field.name, "enabled"]} label="启用" valuePropName="checked">
+                                                                        <Switch disabled={blockedByOtherType} />
+                                                                    </Form.Item>
+                                                                </Col>
+                                                                {isWebDAV && weightField}
+                                                                {isWebDAV ? (
+                                                                    <>
+                                                                        <Col xs={24} md={6}>
+                                                                            <Form.Item name={[field.name, "pathPrefix"]} label="远程目录">
+                                                                                <Input placeholder="请输入远程目录" />
+                                                                            </Form.Item>
+                                                                        </Col>
+                                                                        <Col xs={24} md={6}>
+                                                                            <Form.Item name={[field.name, "username"]} label="用户名">
+                                                                                <Input />
+                                                                            </Form.Item>
+                                                                        </Col>
+                                                                        <Col xs={24} md={6}>
+                                                                            <Form.Item name={[field.name, "password"]} label="密码 / 应用密码">
+                                                                                <Input.Password placeholder="留空沿用已保存密码" />
+                                                                            </Form.Item>
+                                                                        </Col>
+                                                                        <Col xs={0} md={6} />
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <Col xs={24} md={6}>
+                                                                            <Form.Item name={[field.name, "accessKeyId"]} label="Access Key ID">
+                                                                                <Input />
+                                                                            </Form.Item>
+                                                                        </Col>
+                                                                        <Col xs={24} md={6}>
+                                                                            <Form.Item name={[field.name, "secretAccessKey"]} label="Secret Access Key">
+                                                                                <Input.Password placeholder="留空沿用已保存密钥" />
+                                                                            </Form.Item>
+                                                                        </Col>
+                                                                        <Col xs={24} md={6}>
+                                                                            <Form.Item name={[field.name, "publicBaseUrl"]} label="公开访问域名">
+                                                                                <Input placeholder="可选，不填则走后端代理读取" />
+                                                                            </Form.Item>
+                                                                        </Col>
+                                                                        <Col xs={24} md={3}>
+                                                                            <Form.Item name={[field.name, "pathPrefix"]} label="路径前缀">
+                                                                                <Input placeholder="canvas" />
+                                                                            </Form.Item>
+                                                                        </Col>
+                                                                        {weightField}
+                                                                    </>
+                                                                )}
+                                                                <Col xs={24} md={4}>
+                                                                    <Form.Item label="已用容量">
+                                                                        <Typography.Text>{formatStorageBytes(form.getFieldValue(["private", "storage", "providers", field.name, "capacityBytes"]) || 0)}</Typography.Text>
+                                                                    </Form.Item>
+                                                                </Col>
+                                                                <Col xs={24} md={5}>
+                                                                    <Form.Item name={[field.name, "capacityCheckedAt"]} label="统计时间">
+                                                                        <Input disabled />
+                                                                    </Form.Item>
+                                                                </Col>
+                                                                <Col xs={24} md={3}>
+                                                                    <Form.Item name={[field.name, "capacityExceeded"]} label="超限" valuePropName="checked">
+                                                                        <Switch disabled />
+                                                                    </Form.Item>
+                                                                </Col>
+                                                            </Row>
+                                                        </Card>
+                                                    );
+                                                })}
                                             </Flex>
                                         )}
                                     </Form.List>
@@ -1116,17 +1160,26 @@ function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}
 }
 
 function normalizeStorageProvider(item: Partial<AdminStorageProvider> = {}): AdminStorageProvider {
+    const type = item.type === "webdav" ? "webdav" : "s3";
     return {
-        ...emptyStorageProvider,
+        ...(type === "webdav" ? emptyWebDAVStorageProvider : emptyS3StorageProvider),
         ...item,
         id: item.id || "",
-        type: "s3",
-        region: item.region || "auto",
+        type,
+        region: type === "s3" ? item.region || "auto" : "",
         weight: Math.max(1, Number(item.weight) || 1),
         enabled: item.enabled !== false,
         capacityBytes: Number(item.capacityBytes) || 0,
         capacityCheckedAt: item.capacityCheckedAt || "",
         capacityExceeded: item.capacityExceeded === true,
+    };
+}
+
+function newAdminStorageProvider(type: AdminStorageProvider["type"], providers: AdminStorageProvider[]) {
+    const template = type === "webdav" ? emptyWebDAVStorageProvider : emptyS3StorageProvider;
+    return {
+        ...template,
+        enabled: !providers.some((provider) => provider.enabled && provider.type !== type),
     };
 }
 

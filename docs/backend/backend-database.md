@@ -30,6 +30,8 @@ description: 当前后端主要数据表与字段说明
 - `canvas_image_tasks`
 - `canvas_audio_tasks`
 - `canvas_projects`
+- `user_configs`
+- `storage_objects`
 
 后续新增表时再同步补充本文档，未实际使用的规划表不提前写入。
 
@@ -58,6 +60,42 @@ description: 当前后端主要数据表与字段说明
 | `extra` | json | 扩展信息，第三方资料按平台命名空间保存，如 `linuxDo` |
 | `created_at` | string | 创建时间 |
 | `updated_at` | string | 更新时间 |
+
+### user_configs
+
+用户级配置和同步数据表。每个用户一行，模型配置、用户存储配置及其他同步数据继续保存在原有 text 字段中。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `user_id` | string | 用户 ID，主键 |
+| `model_config` | text | 模型与偏好配置 JSON；S3/R2 和 WebDAV 的自动同步开关分别为 `syncStorageConfig`、`syncWebDAVStorageConfig` |
+| `storage_provider` | text | 用户存储配置 JSON，内部结构为 `{ "s3": {...}, "webdav": {...} }`，两类配置可保留但不能同时启用 |
+| `image_history` | text | 用户图片历史同步数据 |
+| `asset_data` | text | 用户素材同步数据 |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
+
+`storage_provider.s3` 保存 Endpoint、Region、Bucket、Access Key、Secret、公开域名和路径前缀；`storage_provider.webdav` 保存 WebDAV 地址、远程目录、用户名和密码/应用密码。自动同步开关不重复写入 Provider；后端下载和删除旧媒体时仍会读取已保存但已停用的 Provider。
+
+### storage_objects
+
+S3/R2 与 WebDAV 共用的媒体文件索引表，不保存画布、素材列表或生成记录。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 文件 ID，前端存储 key 使用 `server:<id>` |
+| `provider_id` | string | 创建文件时使用的 S3/R2 或 WebDAV Provider ID |
+| `bucket` | string | S3/R2 Bucket；WebDAV 为空 |
+| `object_key` | string | Provider 内相对对象路径，唯一索引 |
+| `public_url` | string | S3/R2 可选公开地址；WebDAV 为空并通过 `/api/files/:id/content` 读取 |
+| `mime_type` | string | 媒体 MIME 类型 |
+| `bytes` | number | 文件字节数 |
+| `width` | number | 预留字段，当前上传链路未写入，默认 `0` |
+| `height` | number | 预留字段，当前上传链路未写入，默认 `0` |
+| `sha256` | string | 文件内容摘要 |
+| `created_by` | string | 创建用户 ID |
+| `created_at` | string | 创建时间 |
+| `deleted_at` | string | 预留字段；当前删除链路直接删除索引记录 |
 
 ### prompts
 

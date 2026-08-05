@@ -4,7 +4,7 @@ import localforage from "localforage";
 import { nanoid } from "nanoid";
 
 import { apiGet } from "@/services/api/request";
-import { canUseGlobalStorage, getProxyUrl, loadUserStorageProvider, type StorageConfig, type UserStorageProvider } from "@/services/image-storage";
+import { canUseGlobalStorage, getProxyUrl, loadUserStorageProvider, toProviderPayload, type StorageConfig } from "@/services/image-storage";
 import { useUserStore } from "@/stores/use-user-store";
 
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
@@ -177,18 +177,4 @@ function readVideoMeta(url: string) {
         video.onerror = done;
         video.src = url;
     });
-}
-
-function toProviderPayload(provider: UserStorageProvider) {
-    return {
-        name: provider.name,
-        type: provider.type || "s3",
-        endpoint: provider.endpoint,
-        region: provider.region || "auto",
-        bucket: provider.bucket,
-        accessKeyId: provider.accessKeyId,
-        secretAccessKey: provider.secretAccessKey,
-        publicBaseUrl: provider.publicBaseUrl,
-        pathPrefix: provider.pathPrefix,
-    };
 }

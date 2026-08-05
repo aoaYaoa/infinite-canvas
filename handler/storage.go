@@ -20,10 +20,10 @@ func StorageConfig(w http.ResponseWriter, r *http.Request) {
 	OK(w, config)
 }
 
-// SaveUserStorageProvider 保存用户配置的 S3/R2 存储提供商。
+// SaveUserStorageProvider 保存用户配置的存储提供商。
 func SaveUserStorageProvider(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		Provider service.StorageObjectProviderInput `json:"provider"`
+		Provider service.UserStorageProviders `json:"provider"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		Fail(w, "配置内容格式错误")
