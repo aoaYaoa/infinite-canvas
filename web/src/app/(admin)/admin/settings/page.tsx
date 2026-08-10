@@ -672,7 +672,6 @@ export default function AdminSettingsPage() {
                                                 {fields.map((field) => {
                                                     const provider = storageProviders[field.name] || emptyS3StorageProvider;
                                                     const isWebDAV = provider.type === "webdav";
-                                                    const blockedByOtherType = storageProviders.some((item: AdminStorageProvider, index: number) => index !== field.name && item.enabled && item.type !== provider.type);
                                                     const weightField = (
                                                         <Col xs={24} md={3}>
                                                             <Form.Item name={[field.name, "weight"]} label="权重">
@@ -724,7 +723,18 @@ export default function AdminSettingsPage() {
                                                                 )}
                                                                 <Col xs={24} md={4}>
                                                                     <Form.Item name={[field.name, "enabled"]} label="启用" valuePropName="checked">
-                                                                        <Switch disabled={blockedByOtherType} />
+                                                                        <Switch
+                                                                            onChange={(checked) => {
+                                                                                if (!checked) return;
+                                                                                const providers = form.getFieldValue(["private", "storage", "providers"]) || [];
+                                                                                const type = form.getFieldValue(["private", "storage", "providers", field.name, "type"]);
+                                                                                providers.forEach((item: AdminStorageProvider, i: number) => {
+                                                                                    if (i !== field.name && item.type !== type) {
+                                                                                        form.setFieldValue(["private", "storage", "providers", i, "enabled"], false);
+                                                                                    }
+                                                                                });
+                                                                            }}
+                                                                        />
                                                                     </Form.Item>
                                                                 </Col>
                                                                 {isWebDAV && weightField}
@@ -889,6 +899,7 @@ export default function AdminSettingsPage() {
                                         options={[
                                             { label: "OpenAI", value: "openai" },
                                             { label: "KIE", value: "kie" },
+                                            { label: "MiMo", value: "mimo" },
                                         ]}
                                     />
                                 </Form.Item>
@@ -1027,7 +1038,7 @@ export default function AdminSettingsPage() {
                     destroyOnHidden
                 >
                     <Flex vertical gap={12}>
-                        <Typography.Text type="secondary">测试会向选中模型发送一条 hi，用于确认渠道是否有响应。</Typography.Text>
+                        <Typography.Text type="secondary">测试会向选中模型发送最小测试请求，用于确认渠道是否有响应。</Typography.Text>
                         <Input.Search placeholder="搜索模型..." allowClear value={testKeyword} onChange={(event) => setTestKeyword(event.target.value)} />
                         <Table
                             rowKey="model"
@@ -1052,6 +1063,7 @@ export default function AdminSettingsPage() {
                                             <Space size={6} wrap>
                                                 <Tag color="success">成功</Tag>
                                                 <Typography.Text type="secondary">请求时长: {result.duration}</Typography.Text>
+                                                {result.message && result.message !== "ok" ? <Typography.Text type="secondary">{result.message}</Typography.Text> : null}
                                             </Space>
                                         ) : (
                                             <Typography.Text type="danger">{result.message}</Typography.Text>

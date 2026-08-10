@@ -8,12 +8,16 @@ export function supportsVideoFrameReferences(modelName: string) {
         model === "bytedance-seedance-2" ||
         model === "bytedance-seedance-2-fast" ||
         model === "bytedance-seedance-2-mini" ||
+        model === "bytedance-seedance-2-5" ||
         model === "wan-2-7-image-to-video" ||
         model === "bytedance-v1-lite-image-to-video" ||
         model === "hailuo-02-image-to-video-standard" ||
         model === "hailuo-02-image-to-video-pro" ||
         model === "kling-v2-1-pro" ||
         model === "kling-v2-5-turbo-image-to-video-pro" ||
+        model === "minimax-h3-image-to-video" ||
+        model === "minimax-h3" ||
+        model.includes("doubao-seedance-2-5") ||
         model.includes("doubao-seedance-2-0") ||
         model.includes("doubao-seedance-1-5") ||
         model.includes("doubao-seedance-1-0") ||
@@ -38,9 +42,11 @@ export function supportsVideoAudioGeneration(modelName: string) {
         model === "bytedance-seedance-2" ||
         model === "bytedance-seedance-2-fast" ||
         model === "bytedance-seedance-2-mini" ||
+        model === "bytedance-seedance-2-5" ||
         model === "wan-2-6-flash-image-to-video" ||
         model === "wan-2-6-flash-video-to-video" ||
         model.includes("bytedance-seedance-1-5") ||
+        model.includes("doubao-seedance-2-5") ||
         model.includes("doubao-seedance-2-0") ||
         model.includes("doubao-seedance-1-5") ||
         (model.includes("veo") && model.includes("official")) ||
