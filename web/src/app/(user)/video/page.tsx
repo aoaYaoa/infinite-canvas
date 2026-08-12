@@ -2465,7 +2465,7 @@ function videoFromTaskResponse(task: VideoResponse, durationMs: number): Generat
     return {
         id: task.id || task.video_id || task.task_id || nanoid(),
         url: task.video_url || task.url || "",
-        storageKey: "",
+        storageKey: task.storageKey || "",
         durationMs,
         width: size.width,
         height: size.height,

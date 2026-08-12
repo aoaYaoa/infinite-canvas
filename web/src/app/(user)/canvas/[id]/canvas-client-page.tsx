@@ -4590,7 +4590,7 @@ function applyCanvasVideoTaskUpdate(nodes: CanvasNodeData[], nodeId: string, tas
             metadata: {
                 ...metadata,
                 content: url,
-                storageKey: "",
+                storageKey: task.storageKey || "",
                 status: NODE_STATUS_SUCCESS,
                 naturalWidth: taskSize.width,
                 naturalHeight: taskSize.height,
