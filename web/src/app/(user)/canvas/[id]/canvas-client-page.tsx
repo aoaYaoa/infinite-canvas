@@ -68,6 +68,7 @@ import {
     type CanvasConnection,
     type CanvasDirectorCapture,
     type CanvasDirectorPanorama,
+    type CanvasDirectorVideo,
     type CanvasImageGenerationType,
     type CanvasNodeData,
     type CanvasNodeMetadata,
@@ -1557,23 +1558,11 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         const hideLoading = message.loading("正在上传视频...", 0);
         try {
             const video = await uploadMediaFile(file, "video");
-            const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-            const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-            setNodes((prev) => [
-                ...prev,
-                {
-                    id,
-                    type: CanvasNodeType.Video,
-                    title: file.name,
-                    position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
-                    width: size.width,
-                    height: size.height,
-                    metadata: videoMetadata(video),
-                },
-            ]);
-            setSelectedNodeIds(new Set([id]));
+            const node = buildImportedVideoNode(video, file.name, position);
+            setNodes((prev) => [...prev, node]);
+            setSelectedNodeIds(new Set([node.id]));
             setSelectedConnectionId(null);
-            setDialogNodeId(id);
+            setDialogNodeId(node.id);
         } catch (error) {
             console.error("Upload video node failed:", error);
             message.error("视频上传失败");
@@ -1879,14 +1868,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         };
                     }),
                 );
-                let y = director.position.y;
-                for (const connection of connectionsRef.current) {
-                    if (connection.fromNodeId !== director.id) continue;
-                    const outputNode = nodesRef.current.find((node) => node.id === connection.toNodeId);
-                    if (outputNode?.type === CanvasNodeType.Image) {
-                        y = Math.max(y, outputNode.position.y + outputNode.height + 36);
-                    }
-                }
+                let y = getNextDirectorOutputY(director, nodesRef.current, connectionsRef.current);
                 const imageNodes = images.map((image) => {
                     const node = {
                         id: image.id,
@@ -1908,6 +1890,42 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             } catch (error) {
                 console.error("Send director captures to canvas failed:", error);
                 message.error("截图发送到画布失败");
+            } finally {
+                hideLoading();
+            }
+        },
+        [message],
+    );
+
+    const handleDirectorVideoSent = useCallback(
+        async (directorNodeId: string, output: CanvasDirectorVideo) => {
+            const director = nodesRef.current.find((node) => node.id === directorNodeId && node.type === CanvasNodeType.Director);
+            if (!director) return;
+
+            const hideLoading = message.loading("正在发送视频到画布...", 0);
+            try {
+                const uploaded = await uploadMediaFile(output.blob, "video");
+                const video = {
+                    ...uploaded,
+                    width: uploaded.width || output.width,
+                    height: uploaded.height || output.height,
+                    durationMs: uploaded.durationMs || Math.round(output.durationSeconds * 1000),
+                };
+                const y = getNextDirectorOutputY(director, nodesRef.current, connectionsRef.current);
+                const size = fitNodeSize(video.width, video.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                const node = buildImportedVideoNode(video, output.fileName, {
+                    x: director.position.x + director.width + 96 + size.width / 2,
+                    y: y + size.height / 2,
+                });
+                setNodes((prev) => [...prev, node]);
+                setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: director.id, toNodeId: node.id }]);
+                setSelectedNodeIds(new Set([node.id]));
+                setSelectedConnectionId(null);
+                setDialogNodeId(node.id);
+                message.success("视频已发送到画布");
+            } catch (error) {
+                console.error("Send director video to canvas failed:", error);
+                message.error("视频发送到画布失败");
             } finally {
                 hideLoading();
             }
@@ -3825,6 +3843,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         onProjectChange={handleDirectorProjectChange}
                         onPanoramaRemoved={handleDirectorPanoramaRemoved}
                         onCapturesSent={handleDirectorCapturesSent}
+                        onVideoSent={handleDirectorVideoSent}
                     />
                 ) : null}
 
@@ -4375,6 +4394,33 @@ function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
 
 function videoMetadata(video: UploadedFile): CanvasNodeMetadata {
     return { content: video.url, storageKey: video.storageKey, status: "success", naturalWidth: video.width, naturalHeight: video.height, bytes: video.bytes, mimeType: video.mimeType || "video/mp4", durationMs: video.durationMs };
+}
+
+function buildImportedVideoNode(video: UploadedFile, title: string, center: Position): CanvasNodeData {
+    const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+    return {
+        id: `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        type: CanvasNodeType.Video,
+        title,
+        position: { x: center.x - size.width / 2, y: center.y - size.height / 2 },
+        width: size.width,
+        height: size.height,
+        metadata: videoMetadata(video),
+    };
+}
+
+function getNextDirectorOutputY(
+    director: CanvasNodeData,
+    nodes: CanvasNodeData[],
+    connections: CanvasConnection[],
+) {
+    return connections.reduce((y, connection) => {
+        if (connection.fromNodeId !== director.id) return y;
+        const output = nodes.find((node) => node.id === connection.toNodeId);
+        return output?.type === CanvasNodeType.Image || output?.type === CanvasNodeType.Video
+            ? Math.max(y, output.position.y + output.height + 36)
+            : y;
+    }, director.position.y);
 }
 
 function audioMetadata(audio: UploadedFile): CanvasNodeMetadata {
