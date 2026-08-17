@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -16,6 +17,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -254,44 +257,25 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 	task.StartedAt = current
 	task, _ = service.SaveCanvasImageTask(task)
 
-	var payload []byte
-	var status int
-	var responseContentType string
-	var imageURLs []string
-	var mimeType string
-	var bytes int64
+	payload, status, responseContentType, err := executeCanvasAIRequest(user, task.Endpoint, body, contentType, channelID, userChannelID)
+	if err != nil {
+		saveFailedCanvasImageTask(task, err.Error(), err.Error())
+		return
+	}
+	if status >= http.StatusBadRequest {
+		message := readUpstreamAIErrorMessage(payload, status)
+		saveFailedCanvasImageTask(task, message, string(payload))
+		return
+	}
+	if message := readWrappedTaskError(payload); message != "" {
+		saveFailedCanvasImageTask(task, message, string(payload))
+		return
+	}
 	collectAll := isKIESeedreamLayerDecompositionModel(task.Model)
-	for attempt := 0; attempt < 2; attempt++ {
-		var err error
-		payload, status, responseContentType, err = executeCanvasAIRequest(user, task.Endpoint, body, contentType, channelID, userChannelID)
-		if err != nil {
-			saveFailedCanvasImageTask(task, err.Error(), err.Error())
-			return
-		}
-		if status >= http.StatusBadRequest {
-			if attempt == 0 && shouldRetryCanvasImageTaskFailure(status, payload, nil) {
-				continue
-			}
-			message := readUpstreamAIErrorMessage(payload, status)
-			saveFailedCanvasImageTask(task, message, string(payload))
-			return
-		}
-		if message := readWrappedTaskError(payload); message != "" {
-			if attempt == 0 && shouldRetryCanvasImageTaskFailure(status, payload, errors.New(message)) {
-				continue
-			}
-			saveFailedCanvasImageTask(task, message, string(payload))
-			return
-		}
-		imageURLs, mimeType, bytes, err = imageURLsFromAIResponse(payload, responseContentType, collectAll)
-		if err != nil {
-			if attempt == 0 && shouldRetryCanvasImageTaskFailure(status, payload, err) {
-				continue
-			}
-			saveFailedCanvasImageTask(task, err.Error(), string(payload))
-			return
-		}
-		break
+	imageURLs, mimeType, bytes, err := imageURLsFromAIResponse(payload, responseContentType, collectAll)
+	if err != nil {
+		saveFailedCanvasImageTask(task, err.Error(), string(payload))
+		return
 	}
 	task.Status = "completed"
 	task.Progress = 100
@@ -309,43 +293,6 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 	task.Error = ""
 	task.ErrorDetail = ""
 	_, _ = service.SaveCanvasImageTask(task)
-}
-
-func shouldRetryCanvasImageTaskFailure(status int, payload []byte, parseErr error) bool {
-	if status == http.StatusTooManyRequests {
-		return false
-	}
-	var root struct {
-		Error *struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-		Code    any    `json:"code"`
-		Msg     string `json:"msg"`
-		Message string `json:"message"`
-	}
-	if json.Unmarshal(payload, &root) == nil {
-		code := strings.ToLower(strings.TrimSpace(firstNonEmpty(toStringSafe(root.Code), func() string {
-			if root.Error != nil {
-				return root.Error.Code
-			}
-			return ""
-		}())))
-		message := firstNonEmpty(root.Msg, root.Message, func() string {
-			if root.Error != nil {
-				return root.Error.Message
-			}
-			return ""
-		}())
-		if code == "image_edit_incomplete" || strings.Contains(message, "未返回可用的编辑图片") {
-			return true
-		}
-	}
-	if status >= http.StatusOK && status < http.StatusMultipleChoices && parseErr != nil && len(bytes.TrimSpace(payload)) == 0 {
-		message := strings.ToLower(parseErr.Error())
-		return strings.Contains(message, "unexpected end") || strings.Contains(message, "unexpected eof") || message == "eof"
-	}
-	return false
 }
 
 func runCanvasAudioTask(task model.CanvasAudioTask, user model.AuthUser, body []byte, contentType string, channelID string, userChannelID string) {
@@ -435,7 +382,7 @@ func readCanvasTaskAIRequest(r *http.Request, fallbackEndpoint string) ([]byte, 
 		return nil, "", "", "", "", "", "", "", "", err
 	}
 	if strings.HasPrefix(contentType, "multipart/form-data") {
-		body, cleanedContentType, meta, err := stripCanvasTaskMultipartFields(raw, contentType)
+		body, cleanedContentType, meta, err := stripCanvasTaskMultipartFields(raw, contentType, strings.HasPrefix(fallbackEndpoint, "/images/"))
 		if err != nil {
 			return nil, "", "", "", "", "", "", "", "", err
 		}
@@ -468,7 +415,7 @@ func readCanvasTaskAIRequest(r *http.Request, fallbackEndpoint string) ([]byte, 
 	return body, "application/json", endpoint, wrapper.Source, wrapper.NodeID, wrapper.SourceID, firstNonEmpty(wrapper.ClientTaskID, wrapper.TaskID), wrapper.Prompt, wrapper.ChannelID, nil
 }
 
-func stripCanvasTaskMultipartFields(raw []byte, contentType string) ([]byte, string, map[string]string, error) {
+func stripCanvasTaskMultipartFields(raw []byte, contentType string, normalizeImages bool) ([]byte, string, map[string]string, error) {
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		return nil, "", nil, err
@@ -494,22 +441,9 @@ func stripCanvasTaskMultipartFields(raw []byte, contentType string) ([]byte, str
 	}
 	for key, files := range form.File {
 		for _, header := range files {
-			file, err := header.Open()
-			if err != nil {
+			if err := writeCanvasTaskMultipartFile(writer, key, header, normalizeImages); err != nil {
 				_ = writer.Close()
 				return nil, "", nil, err
-			}
-			part, err := writer.CreateFormFile(key, header.Filename)
-			if err != nil {
-				_ = file.Close()
-				_ = writer.Close()
-				return nil, "", nil, err
-			}
-			_, copyErr := io.Copy(part, file)
-			_ = file.Close()
-			if copyErr != nil {
-				_ = writer.Close()
-				return nil, "", nil, copyErr
 			}
 		}
 	}
@@ -517,6 +451,53 @@ func stripCanvasTaskMultipartFields(raw []byte, contentType string) ([]byte, str
 		return nil, "", nil, err
 	}
 	return buffer.Bytes(), writer.FormDataContentType(), meta, nil
+}
+
+func writeCanvasTaskMultipartFile(writer *multipart.Writer, field string, header *multipart.FileHeader, normalizeImage bool) error {
+	file, err := header.Open()
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	reader := io.Reader(file)
+	mimeType, extension := "", ""
+	if normalizeImage {
+		buffered := bufio.NewReaderSize(file, 512)
+		head, _ := buffered.Peek(512)
+		mimeType, extension = canvasTaskImageType(head)
+		reader = buffered
+	}
+	var part io.Writer
+	if mimeType == "" {
+		part, err = writer.CreateFormFile(field, header.Filename)
+	} else {
+		filename := strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
+		if filename == "" {
+			filename = "reference"
+		}
+		partHeader := make(textproto.MIMEHeader)
+		partHeader.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": field, "filename": filename + extension}))
+		partHeader.Set("Content-Type", mimeType)
+		part, err = writer.CreatePart(partHeader)
+	}
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(part, reader)
+	return err
+}
+
+func canvasTaskImageType(data []byte) (string, string) {
+	switch http.DetectContentType(data) {
+	case "image/jpeg":
+		return "image/jpeg", ".jpg"
+	case "image/png":
+		return "image/png", ".png"
+	case "image/webp":
+		return "image/webp", ".webp"
+	default:
+		return "", ""
+	}
 }
 
 func readAIModelFromBody(body []byte, contentType string) string {

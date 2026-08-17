@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -145,7 +144,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parsed := parseVideoTaskPayload(transformed, modelName)
-	if !hasVideoCreateResult(parsed) {
+	if parsed.UpstreamTaskID == "" && parsed.UpstreamVideoID == "" {
 		if credits > 0 {
 			refundVideoCredits(user.ID, modelName, credits, upstreamPath)
 		}
@@ -162,7 +161,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		ChannelName:     channel.Name,
 		Source:          readVideoTaskSource(r),
 		SourceID:        readVideoTaskSourceID(r),
-		ClientTaskID:    readClientVideoTaskID(r),
+		ClientTaskID:     readClientVideoTaskID(r),
 		UpstreamTaskID:  parsed.UpstreamTaskID,
 		UpstreamVideoID: parsed.UpstreamVideoID,
 		Status:          parsed.Status,
@@ -306,9 +305,6 @@ func normalizeVideoCreateBody(body []byte, contentType string, modelName string,
 	if isAPIMartChannel(channel, modelName) && upstreamPath == "/videos/generations" {
 		return normalizeAPIMartVideoBody(body, contentType, modelName, channel)
 	}
-	if isGrok2APIChannel(channel) && upstreamPath == "/videos" {
-		return normalizeGrok2APIVideoBody(body, contentType)
-	}
 	return body, contentType, nil
 }
 
@@ -333,9 +329,6 @@ func transformVideoCreatePayload(payload []byte, request *http.Request, channel 
 			return transformed
 		}
 	}
-	if isGrok2APIChannel(channel) && strings.Contains(request.URL.Path, "/videos") {
-		return absolutizeGrok2APIVideoURLs(payload, channel)
-	}
 	return payload
 }
 
@@ -350,89 +343,7 @@ func transformVideoStatusPayload(payload []byte, request *http.Request, channel 
 			return transformed
 		}
 	}
-	if isGrok2APIChannel(channel) {
-		return absolutizeGrok2APIVideoURLs(payload, channel)
-	}
 	return payload
-}
-
-func absolutizeGrok2APIVideoURLs(payload []byte, channel model.ModelChannel) []byte {
-	var root any
-	if len(payload) == 0 || json.Unmarshal(payload, &root) != nil {
-		return payload
-	}
-	changed := absolutizeGrok2APIVideoURLValue(&root, "", channel)
-	if !changed {
-		return payload
-	}
-	encoded, err := json.Marshal(root)
-	if err != nil {
-		return payload
-	}
-	return encoded
-}
-
-func absolutizeGrok2APIVideoURLValue(value *any, key string, channel model.ModelChannel) bool {
-	switch typed := (*value).(type) {
-	case map[string]any:
-		changed := false
-		for childKey, item := range typed {
-			if absolutizeGrok2APIVideoURLValue(&item, childKey, channel) {
-				typed[childKey] = item
-				changed = true
-			}
-		}
-		return changed
-	case []any:
-		changed := false
-		for index, item := range typed {
-			if absolutizeGrok2APIVideoURLValue(&item, key, channel) {
-				typed[index] = item
-				changed = true
-			}
-		}
-		return changed
-	case string:
-		if !isVideoURLField(key) {
-			return false
-		}
-		absolute := absoluteGrok2APIURL(channel, typed)
-		if absolute == typed {
-			return false
-		}
-		*value = absolute
-		return true
-	default:
-		return false
-	}
-}
-
-func isVideoURLField(key string) bool {
-	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "url", "video_url", "videourl", "download_url", "downloadurl", "output_url", "outputurl":
-		return true
-	default:
-		return false
-	}
-}
-
-func absoluteGrok2APIURL(channel model.ModelChannel, value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") || strings.HasPrefix(value, "data:") {
-		return value
-	}
-	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(channel.BaseURL), "/"))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return value
-	}
-	if strings.HasPrefix(value, "/") {
-		return parsed.Scheme + "://" + parsed.Host + value
-	}
-	base := strings.TrimRight(parsed.Path, "/")
-	if base == "" {
-		base = "/v1"
-	}
-	return parsed.Scheme + "://" + parsed.Host + base + "/" + strings.TrimLeft(value, "/")
 }
 
 func readVideoCreateErrorMessage(raw []byte, transformed []byte, channel model.ModelChannel, modelName string) string {
@@ -470,7 +381,7 @@ func parseVideoTaskPayload(payload []byte, modelName string) parsedVideoTaskPayl
 	result := parsedVideoTaskPayload{
 		UpstreamTaskID:  firstNonEmpty(readStringPath(data, "task_id"), readStringPath(data, "taskId"), readStringPath(data, "id"), readStringPath(data, "request_id")),
 		UpstreamVideoID: firstNonEmpty(readStringPath(data, "video_id"), readStringPath(data, "videoId")),
-		Status:          service.NormalizeVideoTaskStatus(firstNonEmpty(readStringPath(data, "status"), readStringPath(data, "state"))),
+		Status:          service.NormalizeVideoTaskStatus(firstNonEmpty(readStringPath(data, "status"), readStringPath(data, "state"), readStringPath(data, "task_status"))),
 		Progress:        readIntPath(data, "progress"),
 		Seconds:         firstNonEmpty(readStringPath(data, "seconds"), readStringPath(data, "duration")),
 		Size:            firstNonEmpty(readStringPath(data, "size"), readSizeFromDimensions(data)),
@@ -498,10 +409,6 @@ func parseVideoTaskPayload(payload []byte, modelName string) parsedVideoTaskPayl
 		result.ErrorDetail = string(payload)
 	}
 	return result
-}
-
-func hasVideoCreateResult(parsed parsedVideoTaskPayload) bool {
-	return strings.TrimSpace(parsed.UpstreamTaskID) != "" || strings.TrimSpace(parsed.UpstreamVideoID) != "" || strings.TrimSpace(parsed.VideoURL) != ""
 }
 
 func normalizeVideoPayloadMap(value any) map[string]any {
@@ -622,7 +529,7 @@ func findFirstHTTPURL(value any) string {
 			}
 		}
 	case map[string]any:
-		for _, key := range []string{"url", "video_url", "videoUrl", "download_url", "downloadUrl", "output_url", "outputUrl", "resultUrls", "result_urls", "videoUrls", "video_urls", "urls", "videos", "video", "data", "result", "metadata"} {
+		for _, key := range []string{"url", "video_url", "videoUrl", "download_url", "downloadUrl", "output_url", "outputUrl", "resultUrls", "result_urls", "videoUrls", "video_urls", "urls", "videos", "video_result", "video", "data", "result", "metadata"} {
 			if url := findFirstHTTPURL(typed[key]); url != "" {
 				return url
 			}
