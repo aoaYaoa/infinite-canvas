@@ -10,7 +10,7 @@ import { useUserStore } from "@/stores/use-user-store";
 
 export type LocalModelChannel = {
     id: string;
-    protocol: "openai" | "kie" | "mimo";
+    protocol: "openai" | "grok2api" | "apimart" | "kie" | "mimo";
     name: string;
     baseUrl: string;
     apiKey: string;
@@ -76,7 +76,7 @@ export type AiConfig = {
         workflowAgent: string;
     };
     localChannels: LocalModelChannel[];
-    publicChannels: Array<{ id?: string; name?: string; baseUrl?: string; models?: string[]; weight?: number; timeout?: number; enabled?: boolean; remark?: string }>;
+    publicChannels: Array<{ id?: string; protocol?: LocalModelChannel["protocol"]; name?: string; baseUrl?: string; models?: string[]; weight?: number; timeout?: number; enabled?: boolean; remark?: string }>;
     syncStorageConfig: boolean;
     syncWebDAVStorageConfig: boolean;
     activeChannelId: string;
@@ -460,7 +460,7 @@ export function normalizeLocalChannels(config: Partial<AiConfig>): LocalModelCha
     const channels = Array.isArray(config.localChannels) ? config.localChannels : [];
     const normalized: LocalModelChannel[] = channels.map((channel, index) => ({
         id: channel.id || `local-${index + 1}`,
-        protocol: channel.protocol === "kie" || channel.protocol === "mimo" ? channel.protocol : "openai",
+        protocol: channel.protocol || "openai",
         name: typeof channel.name === "string" ? channel.name : `本地渠道 ${index + 1}`,
         baseUrl: channel.baseUrl || "",
         apiKey: channel.apiKey || "",
@@ -490,23 +490,16 @@ export function localChannelForActiveModel(config: AiConfig) {
     return channels.find((channel) => channel.id === preferredId && channel.models.includes(config.model)) || channels.find((channel) => channel.models.includes(config.model)) || channels.find((channel) => channel.id === preferredId) || channels[0];
 }
 
+export function channelProtocolForConfig(config: AiConfig): LocalModelChannel["protocol"] {
+    const channel = config.channelMode === "remote"
+        ? config.publicChannels.find((item) => item.id === channelIdForActiveModel(config)) || config.publicChannels[0]
+        : localChannelForActiveModel(config);
+    return channel?.protocol || "openai";
+}
+
 export type DirectAIProvider = "kie" | "apimart";
 
-const directAIProviderCache = new Map<string, DirectAIProvider | null>();
-
 export function directAIProviderForConfig(config: AiConfig): DirectAIProvider | null {
-    const channel = localChannelForActiveModel(config);
-    if (!channel) return null;
-    const protocol = channel.protocol.toLowerCase();
-    const baseUrl = channel.baseUrl.trim().toLowerCase();
-    const model = (config.model || "").trim().toLowerCase();
-    const key = `${protocol}\n${baseUrl}\n${model}`;
-    if (directAIProviderCache.has(key)) return directAIProviderCache.get(key) || null;
-    const provider = protocol === "kie" || baseUrl.includes("kie.ai") || model.includes("kie/")
-        ? "kie"
-        : baseUrl.includes("apimart.ai") || model.includes("apimart")
-            ? "apimart"
-            : null;
-    directAIProviderCache.set(key, provider);
-    return provider;
+    const protocol = channelProtocolForConfig(config);
+    return protocol === "kie" || protocol === "apimart" ? protocol : null;
 }

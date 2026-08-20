@@ -558,7 +558,7 @@ func resolveAIProxyPath(channel model.ModelChannel, modelName string, path strin
 		}
 		return path
 	}
-	if strings.EqualFold(strings.TrimSpace(modelName), "grok-imagine-video") && path == "/videos" {
+	if strings.EqualFold(strings.TrimSpace(channel.Protocol), "grok2api") && strings.EqualFold(strings.TrimSpace(modelName), "grok-imagine-video") && path == "/videos" {
 		return "/videos/generations"
 	}
 	if isArkSeedanceVideo(channel.BaseURL, modelName) {

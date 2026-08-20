@@ -4,7 +4,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { isKIESeedreamLayerDecompositionModel } from "@/lib/kie-models";
 import { isMimoChannel, mimoModels } from "@/lib/mimo-tts";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
-import { buildApiUrl, channelIdForActiveModel, directAIProviderForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, channelIdForActiveModel, channelProtocolForConfig, directAIProviderForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import { nanoid } from "nanoid";
@@ -165,6 +165,10 @@ function isGrokImageModel(model: string) {
     return model.trim().toLowerCase().startsWith("grok-imagine-image");
 }
 
+function isGrok2APIImageConfig(config: AiConfig) {
+    return channelProtocolForConfig(config) === "grok2api" && isGrokImageModel(config.model);
+}
+
 function isZhipuImageModel(model: string) {
     const value = model.trim().toLowerCase();
     return value === "glm-image" || value.startsWith("cogview-");
@@ -185,7 +189,7 @@ function applyImageGenerationParams(body: Record<string, unknown>, config: AiCon
         return;
     }
 
-    const grok = isGrokImageModel(model) && (operation === "edit" || !model.includes("edit"));
+    const grok = isGrok2APIImageConfig(config) && (operation === "edit" || !model.includes("edit"));
     if (grok) {
         const size = config.size.trim().toLowerCase();
         if (size && size !== "auto") {
@@ -750,7 +754,7 @@ async function requestGrokImageEditSingle(config: AiConfig, prompt: string, refe
 }
 
 async function requestImageEditSingle(config: AiConfig, prompt: string, references: ReferenceImage[], params: ImageRequestParams): Promise<GeneratedImage[]> {
-    if (isGrokImageModel(config.model)) return requestGrokImageEditSingle(config, prompt, references, params);
+    if (isGrok2APIImageConfig(config)) return requestGrokImageEditSingle(config, prompt, references, params);
 
     const mime = IMAGE_MIME;
     const formData = new FormData();
@@ -1020,7 +1024,7 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
             body: JSON.stringify({ endpoint: "/responses", ...meta, request: body }),
         };
     }
-    if (references.length && isGrokImageModel(config.model)) {
+    if (references.length && isGrok2APIImageConfig(config)) {
         const body = await createGrokImageEditBody(config, prompt, references, params);
         return {
             method: "POST",

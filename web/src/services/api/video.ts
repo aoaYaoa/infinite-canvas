@@ -6,7 +6,7 @@ import { isKIEGrokVideoModel, isKIEKlingV3Config, kieKlingOmniVariant } from "@/
 import { isCogVideoX3Model, modelKey, normalizeCogVideoX3Duration, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
 import { resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
-import { buildApiUrl, channelIdForActiveModel, directAIProviderForConfig, localChannelForActiveModel, type AiConfig, type VideoElementReference } from "@/stores/use-config-store";
+import { buildApiUrl, channelIdForActiveModel, channelProtocolForConfig, directAIProviderForConfig, localChannelForActiveModel, type AiConfig, type VideoElementReference } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -179,9 +179,7 @@ export async function deleteVideoGenerationTask(config: AiConfig, task?: VideoRe
 }
 
 function isGrok2APIVideoConfig(config: AiConfig, model: string) {
-    if (model.trim().toLowerCase() !== "grok-imagine-video") return false;
-    const channel = videoChannelText(config, model);
-    return !channel.includes("kie") && !channel.includes("apimart");
+    return model.trim().toLowerCase() === "grok-imagine-video" && videoChannelProtocol(config, model) === "grok2api";
 }
 
 async function cacheProtectedGrokVideo(config: AiConfig, model: string, task: VideoResponse) {
@@ -337,20 +335,15 @@ function isKIEKlingMotionControlVideoConfig(config: AiConfig, model: string) {
 }
 
 function isAPIMartKlingVideoConfig(config: AiConfig, model: string, key: string) {
-    return modelKey(model) === key && videoChannelText(config, model).includes("apimart");
+    return modelKey(model) === key && videoChannelProtocol(config, model) === "apimart";
 }
 
 function isKIEKlingVideoConfig(config: AiConfig, model: string, key: string) {
-    return modelKey(model) === key && videoChannelText(config, model).includes("kie");
+    return modelKey(model) === key && videoChannelProtocol(config, model) === "kie";
 }
 
-function videoChannelText(config: AiConfig, model: string) {
-    const scopedConfig = { ...config, model, videoModel: model };
-    const channelId = channelIdForActiveModel(scopedConfig);
-    const channels = config.channelMode === "remote" ? config.publicChannels : [localChannelForActiveModel(scopedConfig)];
-    const channel = channels.find((item) => (item?.id || "") === channelId) || channels[0];
-    const record = channel as { id?: string; name?: string; baseUrl?: string; remark?: string } | undefined;
-    return [record?.id, record?.name, record?.baseUrl, record?.remark].filter(Boolean).join(" ").toLowerCase();
+function videoChannelProtocol(config: AiConfig, model: string) {
+    return channelProtocolForConfig({ ...config, model, videoModel: model });
 }
 
 function normalizeCharacterOrientation(value: string | undefined) {
