@@ -14,6 +14,10 @@
 </p>
 
 <p align="center">
+  <a href="#联系方式"><img src="https://img.shields.io/badge/微信交流群已开放-扫码加入-07C160?style=flat-square&logo=wechat&logoColor=white" alt="微信群"></a>
+</p>
+
+<p align="center">
   <strong>Windows 本地安装包现已同步更新</strong><br>
   <sub>无需从源码构建，下载即可本地运行</sub>
 </p>
@@ -172,9 +176,22 @@ https://infinite-canvas-cpco.onrender.com?apiKey={key}&baseUrl={address}
 - [系统配置数据结构](docs/backend/system-settings.md)
 - [接口响应约定](docs/backend/api-response.md)
 
+## 联系方式
+
+项目定制二次开发需求，广告赞助合作其他可联系
+
+邮箱：yhb293933@gmail.com
+
+微信交流测试群：
+<p align="center">
+  <img src="assets/wc.png" alt="微信群二维码" width="180">
+</p>
+
 ## 赞助支持
 
 <div align="center">
+
+本项目长期开放广告赞助合作，欢迎品牌 / 产品投放
 
 如果这个项目对你有帮助，欢迎赞助支持，你的每一份鼓励都是持续更新的动力！
 

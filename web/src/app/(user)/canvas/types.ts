@@ -148,6 +148,7 @@ export type CanvasAssistantReference = {
     id: string;
     type: CanvasNodeType;
     title: string;
+    label?: string;
     dataUrl?: string;
     url?: string;
     storageKey?: string;

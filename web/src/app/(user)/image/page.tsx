@@ -2643,7 +2643,23 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     );
     const visibleImages = images.filter((image) => Boolean(image.dataUrl));
     const taskImage = imageFromCompletedTask(log.task, log.durationMs || 0);
-    const restoredImages = visibleImages.length || !taskImage ? visibleImages : [taskImage];
+    const taskImageUrl = taskImage?.dataUrl || log.task?.image_url || log.task?.url || "";
+    const taskImageStorageKey = taskImage?.storageKey || log.task?.storageKey;
+    const taskImageDataUrl = await resolveImageUrl(taskImageStorageKey, taskImageUrl);
+    const restoredImages = visibleImages.length || !taskImageDataUrl
+        ? visibleImages
+        : [{
+            ...(taskImage || {
+                id: log.task?.id || log.id || nanoid(),
+                durationMs: log.durationMs || 0,
+                width: log.task?.width || 0,
+                height: log.task?.height || 0,
+                bytes: log.task?.bytes || 0,
+                mimeType: log.task?.mimeType || "image/png",
+            }),
+            dataUrl: taskImageDataUrl,
+            storageKey: taskImageStorageKey,
+        }];
     const config = normalizeLogConfig(log);
     return {
         id: log.id || nanoid(),
@@ -2854,7 +2870,6 @@ function buildLog({
 function formatLogTime(value: number) {
     return new Date(value).toLocaleString("zh-CN", { hour12: false });
 }
-
 
 
 
