@@ -14,7 +14,7 @@ import {
     Video,
     X,
 } from "lucide-react";
-import { App, Button, Modal, Switch, Tooltip } from "antd";
+import { App, Button, Modal, Segmented, Switch, Tooltip } from "antd";
 import { motion } from "motion/react";
 import { nanoid } from "nanoid";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -69,7 +69,7 @@ type CanvasAssistantPanelProps = {
     onExecuteAction: (action: CanvasAgentAction, messageReferenceNodeIds: string[]) => Promise<CanvasAgentToolResult>;
     onCollapseStart: () => void;
     onCollapse: () => void;
-    initialRequest?: { prompt: string; references: CanvasAssistantReference[] } | null;
+    initialRequest?: { prompt: string; references: CanvasAssistantReference[]; skills: CanvasAgentSkillSelection[] } | null;
     onInitialRequestConsumed?: () => void;
 };
 
@@ -256,7 +256,7 @@ export function CanvasAssistantPanel({
         setSelectedSkills((current) => current.filter((skill) => skill.id !== id || skill.source !== source));
     };
 
-    const sendMessage = async (text: string, savedReferences?: CanvasAssistantReference[], skillOverride?: CanvasAgentSkillSelection[] | null) => {
+    const sendMessage = async (text: string, savedReferences?: CanvasAssistantReference[], skillOverride?: CanvasAgentSkillSelection[] | null, showSelectedSkills = skillOverride === undefined && selectedSkills.length > 0) => {
         const session = activeSession || createSession();
         const activeSkills = skillOverride !== undefined ? skillOverride || [] : selectedSkills.length ? selectedSkills : session.activeSkills || [];
         let activeSkillContents: Array<{ id: string; source: CanvasAgentSkillSelection["source"]; name: string; content: string; hasFiles?: boolean }> = [];
@@ -290,7 +290,7 @@ export function CanvasAssistantPanel({
 
         const references = savedReferences || composerReferences;
         const messageReferenceNodeIds = references.map((reference) => reference.id);
-        const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references, skills: activeSkills, skillsSelected: skillOverride === undefined && selectedSkills.length > 0, status: "success" };
+        const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references, skills: activeSkills, skillsSelected: showSelectedSkills, status: "success" };
         const assistantId = nanoid();
         appendMessage(session.id, userMessage);
         appendMessage(session.id, { id: assistantId, role: "assistant", text: "", status: "thinking", activity: "正在理解画布和创作目标" });
@@ -303,9 +303,11 @@ export function CanvasAssistantPanel({
             ...effectiveConfig,
             model: effectiveConfig.textModel || effectiveConfig.model,
             apiMode: agentConfig.textApiMode,
+            textReasoningEnabled: agentConfig.textReasoningEnabled === true,
             activeChannelId: effectiveConfig.textChannelId || effectiveConfig.activeChannelId,
             textChannelId: effectiveConfig.textChannelId,
         };
+        const jsonToolFallbackKey = [requestConfig.apiMode || "chat", requestConfig.textChannelId || requestConfig.activeChannelId || requestConfig.baseUrl, requestConfig.model].join("|");
         if (!isAiConfigReady(requestConfig, requestConfig.model)) {
             updateMessage(session.id, assistantId, {
                 text: "全局文本模型尚未配置完成。请先从应用原有的全局配置入口选择文本模型和渠道，然后再继续。",
@@ -337,6 +339,7 @@ export function CanvasAssistantPanel({
                 references: modelReferences,
                 activeSkillContents,
                 contextCheckpoint: session.contextCheckpoint,
+                preferredJsonMode: session.jsonToolFallbackKey === jsonToolFallbackKey ? session.jsonToolFallbackMode || "structured-json" : undefined,
                 getContext: getAgentContext,
                 executeAction: async (action) => {
                     if (action.name === "read_skill_file") {
@@ -369,6 +372,8 @@ export function CanvasAssistantPanel({
                         agentState: checkpoint.state,
                         protocolMessages: checkpoint.protocolMessages,
                         contextCheckpoint: checkpoint.contextCheckpoint,
+                        jsonToolFallbackKey: checkpoint.jsonFallbackMode ? jsonToolFallbackKey : undefined,
+                        jsonToolFallbackMode: checkpoint.jsonFallbackMode,
                         updatedAt: new Date().toISOString(),
                     })),
             });
@@ -377,6 +382,8 @@ export function CanvasAssistantPanel({
                 agentState: result.state,
                 protocolMessages: result.protocolMessages,
                 contextCheckpoint: result.contextCheckpoint,
+                jsonToolFallbackKey: result.jsonFallbackMode ? jsonToolFallbackKey : undefined,
+                jsonToolFallbackMode: result.jsonFallbackMode,
                 messages: current.messages.map((message) =>
                     message.id === assistantId ? { ...message, text: result.reply, status: "success", activity: undefined } : message,
                 ),
@@ -399,7 +406,7 @@ export function CanvasAssistantPanel({
         if (!initialRequest || consumedInitialRequestRef.current === initialRequest) return;
         consumedInitialRequestRef.current = initialRequest;
         onInitialRequestConsumed?.();
-        void sendMessage(initialRequest.prompt, initialRequest.references);
+        void sendMessage(initialRequest.prompt, initialRequest.references, initialRequest.skills, initialRequest.skills.length > 0);
     }, [initialRequest, onInitialRequestConsumed]);
 
     const submit = async (nextPrompt = prompt, referenceIds = composerReferenceIds) => {
@@ -574,6 +581,17 @@ export function CanvasAssistantPanel({
                     onCancel={() => setSettingsOpen(false)}
                     footer={<Button type="primary" onClick={() => setSettingsOpen(false)}>完成</Button>}
                 >
+                    <div className="flex items-center justify-between gap-6 py-2">
+                        <div className="min-w-0">
+                            <div className="text-sm font-medium">文本接口</div>
+                            <div className="mt-1 text-xs leading-5 opacity-55">选择使用 Chat Completions 或 Responses 接口</div>
+                        </div>
+                        <Segmented
+                            value={agentConfig.textApiMode}
+                            options={[{ label: "Chat", value: "chat" }, { label: "Responses", value: "responses" }]}
+                            onChange={(textApiMode) => onAgentConfigChange({ textApiMode: textApiMode as CanvasAgentConfig["textApiMode"] })}
+                        />
+                    </div>
                     <div className="flex items-center justify-between gap-6 py-2">
                         <div className="min-w-0">
                             <div className="text-sm font-medium">自动生成图片/视频/音频</div>

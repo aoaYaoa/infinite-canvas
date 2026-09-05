@@ -1,4 +1,4 @@
-export type ModelChannelProtocol = "openai" | "gemini" | "grok2api" | "metaso" | "apimart" | "kie" | "mimo";
+export type ModelChannelProtocol = "openai" | "gemini" | "grok2api" | "metaso" | "apimart" | "kie" | "mimo" | "88api";
 
 export const modelChannelDefaultBaseUrls: Record<ModelChannelProtocol, string> = {
     openai: "https://api.openai.com",
@@ -8,10 +8,12 @@ export const modelChannelDefaultBaseUrls: Record<ModelChannelProtocol, string> =
     apimart: "https://api.apimart.ai/v1",
     kie: "https://api.kie.ai/api/v1",
     mimo: "https://api.xiaomimimo.com",
+    "88api": "https://88api.ai/v1",
 };
 
 export const modelChannelApiKeyUrls: Partial<Record<ModelChannelProtocol, string>> = {
     metaso: "https://metaso.cn/minimax-h3/?s=tt",
     apimart: "https://apimart.ai/register?aff=fWMrEv",
     mimo: "https://platform.xiaomimimo.com/?ref=JFZQR2",
+    "88api": "https://88api.ai/sign-up?aff=25ty",
 };

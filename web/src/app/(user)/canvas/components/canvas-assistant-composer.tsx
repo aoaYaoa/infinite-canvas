@@ -55,6 +55,7 @@ export function CanvasAssistantComposer({
 }: CanvasAssistantComposerProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const effectiveConfig = useEffectiveConfig();
+    const reasoningEnabled = agentConfig.textReasoningEnabled === true;
     const imageConfig = useMemo(() => ({ ...effectiveConfig, quality: agentConfig.imageQuality, size: agentConfig.imageSize }), [agentConfig.imageQuality, agentConfig.imageSize, effectiveConfig]);
     const videoConfig = useMemo(() => ({ ...effectiveConfig, vquality: agentConfig.videoQuality, size: agentConfig.videoSize }), [agentConfig.videoQuality, agentConfig.videoSize, effectiveConfig]);
     const promptReferences = useMemo(() => {
@@ -124,21 +125,17 @@ export function CanvasAssistantComposer({
                         />
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
-                        <Dropdown
-                            trigger={["click"]}
-                            placement="topRight"
-                            menu={{
-                                selectable: true,
-                                selectedKeys: [agentConfig.textApiMode],
-                                items: [
-                                    { key: "chat", label: "Chat" },
-                                    { key: "responses", label: "Responses" },
-                                ],
-                                onClick: ({ key }) => onAgentConfigChange({ textApiMode: key as CanvasAgentConfig["textApiMode"] }),
-                            }}
-                        >
-                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={{ color: theme.node.text }} icon={<Brain className="size-4" />} aria-label={`文本接口：${agentConfig.textApiMode === "responses" ? "Responses" : "Chat"}`} />
-                        </Dropdown>
+                        <Button
+                            type="text"
+                            shape="circle"
+                            className="!h-8 !w-8 !min-w-8"
+                            style={{ color: theme.node.text, background: reasoningEnabled ? theme.toolbar.activeBg : undefined }}
+                            icon={<Brain className="size-4" />}
+                            title={reasoningEnabled ? "推理已开启" : "推理已关闭"}
+                            aria-label={reasoningEnabled ? "关闭推理" : "开启推理"}
+                            aria-pressed={reasoningEnabled}
+                            onClick={() => onAgentConfigChange({ textReasoningEnabled: !reasoningEnabled })}
+                        />
                         <Button
                             type="primary"
                             shape="circle"

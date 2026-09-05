@@ -833,6 +833,7 @@ export default function AdminSettingsPage() {
                                             { label: "Grok2API", value: "grok2api" },
                                             { label: "MiniMax & METASO", value: "metaso" },
                                             { label: "APIMart", value: "apimart" },
+                                            { label: "88API", value: "88api" },
                                             { label: "KIE", value: "kie" },
                                             { label: "MiMo", value: "mimo" },
                                         ]}

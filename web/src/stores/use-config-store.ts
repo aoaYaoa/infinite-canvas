@@ -10,7 +10,7 @@ import { useUserStore } from "@/stores/use-user-store";
 
 export type LocalModelChannel = {
     id: string;
-    protocol: "openai" | "gemini" | "grok2api" | "metaso" | "apimart" | "kie" | "mimo";
+    protocol: "openai" | "gemini" | "grok2api" | "metaso" | "apimart" | "kie" | "mimo" | "88api";
     name: string;
     baseUrl: string;
     apiKey: string;
@@ -263,6 +263,9 @@ function isVideoModelName(model: string) {
         value.includes("wan/2-7-image-to-video") ||
         value.includes("wan/2-7-videoedit") ||
         value.includes("wan/2-7-r2v") ||
+        value.includes("sd2.0 720p") ||
+        value.includes("sd2.5 480p") ||
+        value.includes("sd2.5 720p") ||
         (value.includes("grok-imagine") && (value.includes("/upscale") || value.includes("/extend")))
     );
 }

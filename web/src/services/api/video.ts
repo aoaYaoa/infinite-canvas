@@ -4,7 +4,7 @@ import { dataUrlToFile, readFileAsDataUrl } from "@/lib/image-utils";
 import { isMiniMaxH3Config, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio, normalizeMiniMaxH3Resolution } from "@/lib/minimax-video";
 import { dataUrlToGeminiInlineData, geminiActionUrl, geminiDirectHeaders, geminiErrorMessage, geminiOperationUrl, isGeminiConfig, isGeminiVideoModel } from "@/lib/gemini";
 import { isGeminiVeo31Model, normalizeGeminiVideoDuration, normalizeGeminiVideoRatio, normalizeGeminiVideoResolution } from "@/lib/gemini-video";
-import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/lib/seedance-video";
+import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio } from "@/lib/seedance-video";
 import { isKIEGrokVideoModel, isKIEKlingV3Config, kieKlingOmniVariant } from "@/components/video-settings-panel";
 import { isAgnesVideoV25Model, isCogVideoX3Model, modelKey, normalizeCogVideoX3Duration, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
 import { resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
@@ -152,7 +152,7 @@ export async function pollCreatedVideoGenerationTask(config: AiConfig, task: Vid
     try {
         if (initialDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, initialDelayMs));
         for (; ;) {
-            const video = await cacheProtectedGeminiVideo(config, model, await pollOnce());
+            const video = await cacheProtectedVideo(config, model, await cacheProtectedGeminiVideo(config, model, await pollOnce()));
             onPoll?.(video);
             if (isFailedVideoStatus(video.status)) throw new VideoRequestError(video.error?.message || "视频生成失败", video);
             if (typeof video.progress === "number") onProgress?.(video.progress, video);
@@ -183,7 +183,7 @@ export async function pollVideoGenerationTaskStatus(config: AiConfig, task: Vide
     const result = directProvider
         ? await (await import("@/services/api/direct-ai")).pollDirectVideoTask(config, directProvider, pollId)
         : unwrapVideoResponseForConfig(config, model, (await axios.get<ApiVideoResponse>(aiVideoPollUrl(config, model, pollId), { headers: aiHeaders(config), params: usesAccountProxy(config) ? { model } : undefined })).data);
-    return cacheProtectedGeminiVideo(config, model, await cacheProtectedGrokVideo(config, model, result));
+    return cacheProtectedGeminiVideo(config, model, await cacheProtectedVideo(config, model, result));
 }
 
 export async function listVideoGenerationTasks(config: AiConfig) {
@@ -206,9 +206,11 @@ function isGrok2APIVideoConfig(config: AiConfig, model: string) {
     return (normalizedModel === "grok-imagine-video" || normalizedModel === "grok-imagine-video-1.5") && videoChannelProtocol(config, model) === "grok2api";
 }
 
-async function cacheProtectedGrokVideo(config: AiConfig, model: string, task: VideoResponse) {
+async function cacheProtectedVideo(config: AiConfig, model: string, task: VideoResponse) {
     const url = task.video_url || task.url || "";
-    if (!isCompletedVideoStatus(task.status) || task.storageKey || !isGrok2APIVideoConfig(config, model) || !/\/v1\/videos\/[^/]+\/content(?:[?#]|$)/.test(url)) return task;
+    const needs88APIContent = videoChannelProtocol(config, model) === "88api" && !url;
+    const needsGrokContent = isGrok2APIVideoConfig(config, model) && /\/v1\/videos\/[^/]+\/content(?:[?#]|$)/.test(url);
+    if (!isCompletedVideoStatus(task.status) || task.storageKey || (!needs88APIContent && !needsGrokContent)) return task;
     const taskId = task.task_id || task.id || task.video_id || "";
     const response = await fetch(`${aiApiUrl(config, `/videos/${encodeURIComponent(taskId)}/content`)}?model=${encodeURIComponent(model)}`, { headers: aiHeaders(config) });
     if (!response.ok) throw new VideoRequestError(`视频内容下载失败：${response.status}`, task);
@@ -258,7 +260,46 @@ async function createAgnesVideoV25RequestBody(config: AiConfig, model: string, p
     return body;
 }
 
+async function create88APIVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
+    const [images, videos, audios, firstFrame, lastFrame] = await Promise.all([
+        Promise.all(input.references.map(referenceTo88APIUrl)),
+        Promise.all(input.videoReferences.map(referenceTo88APIUrl)),
+        Promise.all(input.audioReferences.map(referenceTo88APIUrl)),
+        input.firstFrame ? referenceTo88APIUrl(input.firstFrame) : Promise.resolve(""),
+        input.lastFrame ? referenceTo88APIUrl(input.lastFrame) : Promise.resolve(""),
+    ]);
+    const key = modelKey(model);
+    const veo = key.includes("veo");
+    const geminiOmni = key.includes("gemini-omni");
+    if (geminiOmni && videos.length > 1) throw new VideoRequestError("88API Gemini Omni 仅支持一个参考视频");
+
+    const metadata: Record<string, unknown> = {};
+    if (firstFrame) metadata.firstFrame = firstFrame;
+    if (lastFrame) metadata.lastFrame = lastFrame;
+    if (!geminiOmni && videos.length) metadata.referenceVideos = videos;
+    if (audios.length) metadata.referenceAudios = audios;
+
+    const body: Record<string, unknown> = {
+        model,
+        prompt,
+        seconds: normalizeVideoSecondsForModel(model, config.videoSeconds),
+        generate_audio: boolConfig(config.videoGenerateAudio, false),
+    };
+    if (images.length) body.images = images;
+    if (geminiOmni && videos[0]) body.video = videos[0];
+    if (config.videoNegativePrompt.trim()) body.negative_prompt = config.videoNegativePrompt.trim();
+    if (veo) {
+        if (body.negative_prompt) metadata.negativePrompt = body.negative_prompt;
+        metadata.generateAudio = body.generate_audio;
+        delete body.negative_prompt;
+        delete body.generate_audio;
+    }
+    if (Object.keys(metadata).length) body.metadata = metadata;
+    return body;
+}
+
 async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
+    if (videoChannelProtocol(config, model) === "88api") return create88APIVideoRequestBody(config, model, prompt, input);
     const size = normalizeVideoSize(config.size);
     if (isGeminiVideoModel(model) && isGeminiConfig(config, model)) return createGeminiVeoRequestBody(config, model, prompt, input);
     if (isGrok2APIVideoConfig(config, model)) return createGrok2APIVideoRequestBody(config, model, prompt, input);
@@ -320,7 +361,12 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
     } else if (apimartMotionControl) {
         body.append("mode", normalizeAPIMartKlingMotionControlMode(config.vquality));
     } else {
-        if (!kieMotionControl && !isGeminiOmniFlashVideoModel(model)) body.append("seconds", normalizeVideoSecondsForModel(model, config.videoSeconds));
+        if (!kieMotionControl && !isGeminiOmniFlashVideoModel(model)) {
+            const seconds = isSeedanceVideoConfig(config)
+                ? String(normalizeSeedanceDuration(config.videoSeconds, modelKey(model).includes("seedance-2-5") ? 30 : 15))
+                : normalizeVideoSecondsForModel(model, config.videoSeconds);
+            body.append("seconds", seconds);
+        }
         if (isSeedanceVideoConfig(config)) body.append("size", normalizeSeedanceRatio(config.size));
         else if (size) body.append("size", size);
         body.append("resolution_name", normalizeVideoResolution(config.vquality));
@@ -565,6 +611,17 @@ async function mediaReferenceToFormValue(media: ReferenceVideo | ReferenceAudio)
     const publicUrl = publicHttpUrl(resolvedUrl) || publicHttpUrl(media.url);
     if (publicUrl) return publicUrl;
     return mediaReferenceToFile(media);
+}
+
+async function referenceTo88APIUrl(reference: ReferenceImage | ReferenceVideo | ReferenceAudio) {
+    const resolvedUrl = "dataUrl" in reference
+        ? await resolveImageUrl(reference.storageKey, reference.url || reference.dataUrl)
+        : await resolveMediaUrl(reference.storageKey, reference.url);
+    for (const value of [reference.url, resolvedUrl, "dataUrl" in reference ? reference.dataUrl : ""]) {
+        const url = publicHttpUrl(value);
+        if (url) return url;
+    }
+    throw new VideoRequestError("88API 参考素材必须具有可公开访问的网络地址，请先配置对象存储或上传素材");
 }
 
 async function imageToAgnesReference(image: ReferenceImage) {

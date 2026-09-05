@@ -292,11 +292,11 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, channel model.
 		}
 	}
 	w.WriteHeader(response.StatusCode)
-	responseBody := copyAIResponseBody(w, response.Body)
+	responseBody := copyAIResponseBody(w, response.Body, !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "video/"))
 	saveAIProxyLog(logContext, response.StatusCode, responseBody, "")
 }
 
-func copyAIResponseBody(w http.ResponseWriter, body io.Reader) string {
+func copyAIResponseBody(w http.ResponseWriter, body io.Reader, capture bool) string {
 	flusher, canFlush := w.(http.Flusher)
 	buffer := make([]byte, 32*1024)
 	var logBuffer strings.Builder
@@ -306,7 +306,7 @@ func copyAIResponseBody(w http.ResponseWriter, body io.Reader) string {
 			if _, writeErr := w.Write(buffer[:n]); writeErr != nil {
 				return logBuffer.String()
 			}
-			if logBuffer.Len() < 64*1024 {
+			if capture && logBuffer.Len() < 64*1024 {
 				_, _ = logBuffer.Write(buffer[:min(n, 64*1024-logBuffer.Len())])
 			}
 			if canFlush {

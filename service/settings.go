@@ -80,6 +80,9 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 	if IsMiniMaxChannel(resolved) {
 		return "MiniMax-H3 是异步视频模型，请在视频创作台测试生成。", nil
 	}
+	if strings.EqualFold(strings.TrimSpace(resolved.Protocol), "88api") {
+		return "88API 渠道不会调用聊天接口测试，请在对应创作台验证模型。", nil
+	}
 	if isArkAgentPlanChannel(resolved) || isSeedanceModelName(modelName) {
 		return testArkSeedanceChannelModel(resolved, modelName)
 	}
@@ -426,7 +429,7 @@ func repairDefaultModel(current string, models []string, preferred func(string) 
 
 func isVideoModelName(modelName string) bool {
 	name := strings.ToLower(strings.TrimSpace(modelName))
-	return name == "minimax-h3" || strings.Contains(name, "seedance") || strings.Contains(name, "video")
+	return name == "minimax-h3" || strings.Contains(name, "seedance") || strings.Contains(name, "video") || strings.Contains(name, "sd2.0 720p") || strings.Contains(name, "sd2.5 720p")
 }
 
 func isImageModelName(modelName string) bool {
