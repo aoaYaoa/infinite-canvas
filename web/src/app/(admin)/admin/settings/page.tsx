@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { EditorView } from "@uiw/react-codemirror";
 
 import { ChannelModelSelectorModal } from "@/components/channel-model-selector-modal";
-import { modelChannelApiKeyUrls, modelChannelDefaultBaseUrls } from "@/lib/model-channel";
+import { modelChannelApiKeyUrls, modelChannelDefaultBaseUrls, modelChannelProtocolOptions } from "@/lib/model-channel";
 import { fetchAdminSettings, fetchChannelModels, measureAdminStorageProvider, saveAdminSettings, testChannelModel, type AdminModelChannel, type AdminModelCost, type AdminSettings, type AdminStorageProvider } from "@/services/api/admin";
 import { useUserStore } from "@/stores/use-user-store";
 
@@ -827,16 +827,7 @@ export default function AdminSettingsPage() {
                             <Col span={12}>
                                 <Form.Item name="protocol" label="协议">
                                     <Select
-                                        options={[
-                                            { label: "OpenAI", value: "openai" },
-                                            { label: "Gemini", value: "gemini" },
-                                            { label: "Grok2API", value: "grok2api" },
-                                            { label: "MiniMax & METASO", value: "metaso" },
-                                            { label: "APIMart", value: "apimart" },
-                                            { label: "88API", value: "88api" },
-                                            { label: "KIE", value: "kie" },
-                                            { label: "MiMo", value: "mimo" },
-                                        ]}
+                                        options={modelChannelProtocolOptions}
                                         onChange={(protocol: AdminModelChannel["protocol"]) => {
                                             channelForm.setFieldValue("baseUrl", modelChannelDefaultBaseUrls[protocol]);
                                         }}

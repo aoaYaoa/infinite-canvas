@@ -77,14 +77,8 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 	if err != nil {
 		return "", err
 	}
-	if IsMiniMaxChannel(resolved) {
-		return "MiniMax-H3 是异步视频模型，请在视频创作台测试生成。", nil
-	}
-	if strings.EqualFold(strings.TrimSpace(resolved.Protocol), "88api") {
-		return "88API 渠道不会调用聊天接口测试，请在对应创作台验证模型。", nil
-	}
-	if isArkAgentPlanChannel(resolved) || isSeedanceModelName(modelName) {
-		return testArkSeedanceChannelModel(resolved, modelName)
+	if adapter, ok := matchModelProtocol(modelConfigTestRules, resolved, modelName); ok {
+		return adapter.testModel(resolved, modelName)
 	}
 	return testAdminChannelModel(resolved, modelName)
 }
@@ -324,13 +318,11 @@ func HTTPClientForChannel(channel model.ModelChannel) *http.Client {
 }
 
 func BuildModelChannelURL(channel model.ModelChannel, path string) string {
-	if IsGeminiChannel(channel) {
-		return BuildGeminiChannelURL(channel, path)
-	}
+	return modelProtocolForChannel(channel).buildURL(channel, path)
+}
+
+func buildOpenAIModelChannelURL(channel model.ModelChannel, path string) string {
 	baseURL := normalizeModelChannelBaseURL(channel.BaseURL)
-	if IsMiniMaxChannel(channel) {
-		return baseURL + path
-	}
 	lowerBaseURL := strings.ToLower(baseURL)
 	if !strings.HasSuffix(lowerBaseURL, "/v1") && !strings.HasSuffix(lowerBaseURL, "/api/v3") && !strings.HasSuffix(lowerBaseURL, "/api/plan/v3") && !strings.HasSuffix(lowerBaseURL, "/api/paas/v4") {
 		baseURL += "/v1"
@@ -495,22 +487,11 @@ func resolveAdminChannel(index *int, channel model.ModelChannel) (model.ModelCha
 }
 
 func fetchAdminChannelModels(channel model.ModelChannel) ([]string, error) {
-	if IsGeminiChannel(channel) {
-		return fetchGeminiAdminChannelModels(channel)
-	}
-	if IsMiniMaxChannel(channel) {
-		return MiniMaxModels(), nil
-	}
-	if IsMiMoChannel(channel) {
-		result := MiMoModels()
-		sort.Strings(result)
-		return result, nil
-	}
-	if isKIEAdminChannel(channel) {
-		result := kieMarketModels()
-		sort.Strings(result)
-		return result, nil
-	}
+	adapter, _ := matchModelProtocol(modelDiscoveryRules, channel, "")
+	return adapter.models(channel)
+}
+
+func fetchOpenAIAdminChannelModels(channel model.ModelChannel) ([]string, error) {
 	request, err := http.NewRequest(http.MethodGet, BuildModelChannelURL(channel, "/models"), nil)
 	if err != nil {
 		return nil, err
@@ -676,15 +657,11 @@ func testAdminChannelModel(channel model.ModelChannel, modelName string) (string
 	if strings.TrimSpace(modelName) == "" {
 		return "", errors.New("缺少模型名称")
 	}
-	if strings.EqualFold(strings.TrimSpace(modelName), "glm-tts") {
-		return testGLMTTSChannelModel(channel, modelName)
-	}
-	if IsMiMoTTSModelName(modelName) {
-		return testMiMoTTSChannelModel(channel, modelName)
-	}
-	if IsGeminiChannel(channel) {
-		return testGeminiChannelModel(channel, modelName)
-	}
+	adapter, _ := matchModelProtocol(modelGenerationTestRules, channel, modelName)
+	return adapter.testModel(channel, modelName)
+}
+
+func testOpenAIChannelModel(channel model.ModelChannel, modelName string) (string, error) {
 	body, _ := json.Marshal(map[string]any{
 		"model": modelName,
 		"messages": []map[string]string{{

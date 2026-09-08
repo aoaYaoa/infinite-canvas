@@ -4,13 +4,14 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { directAIProviderForProtocol, type DirectAIProvider, type ModelChannelProtocol } from "@/lib/model-channel";
 import { apiGet } from "@/services/api/request";
 import type { AdminPublicSettings } from "@/services/api/admin";
 import { useUserStore } from "@/stores/use-user-store";
 
 export type LocalModelChannel = {
     id: string;
-    protocol: "openai" | "gemini" | "grok2api" | "metaso" | "apimart" | "kie" | "mimo" | "88api";
+    protocol: ModelChannelProtocol;
     name: string;
     baseUrl: string;
     apiKey: string;
@@ -550,9 +551,8 @@ export function channelProtocolForConfig(config: AiConfig): LocalModelChannel["p
     return channel?.protocol || "openai";
 }
 
-export type DirectAIProvider = "kie" | "apimart";
+export type { DirectAIProvider } from "@/lib/model-channel";
 
 export function directAIProviderForConfig(config: AiConfig): DirectAIProvider | null {
-    const protocol = channelProtocolForConfig(config);
-    return protocol === "kie" || protocol === "apimart" ? protocol : null;
+    return directAIProviderForProtocol(channelProtocolForConfig(config));
 }
