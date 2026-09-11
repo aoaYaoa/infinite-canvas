@@ -20,6 +20,7 @@ import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { isKIEKlingV3Config, kieKlingOmniVariant } from "@/components/video-settings-panel";
 import { useAssetStore } from "@/stores/use-asset-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "../utils/canvas-image-data";
 import { fitNodeSize, nodeSizeFromRatio } from "../utils/canvas-node-size";
@@ -30,6 +31,7 @@ import { GROUP_PADDING, findContainingGroupId, findGroupDropTarget, getNodeBound
 import { App, Button, Dropdown, Modal, Slider } from "antd";
 import { isCogVideoX3Model, modelKey, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
 import { isMimoVoiceCloneModel } from "@/lib/mimo-tts";
+import { isAutoDLConfig } from "@/lib/autodl";
 import { isGlmTtsModel } from "@/lib/audio-generation";
 import { isGrok2APITtsConfig } from "@/lib/grok-tts";
 import { isGeminiConfig, isGeminiTtsModel } from "@/lib/gemini";
@@ -312,6 +314,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const lastHistoryRef = useRef<CanvasHistoryEntry | null>(null);
     const historyCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const historyCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const historyCleanupKeysRef = useRef(new Map<string, string>());
     const viewportSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const sidePanelSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const focusAnimationRef = useRef<number | null>(null);
@@ -459,8 +462,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     );
 
     const cleanupCanvasFiles = useCallback(
-        (extra?: unknown) => {
-            cleanupAssetImages({ extra, history: historyRef.current, lastHistory: lastHistoryRef.current });
+        (extra?: unknown, storageKeys?: ReadonlyMap<string, string>) => {
+            cleanupAssetImages({ extra, history: historyRef.current, lastHistory: lastHistoryRef.current }, storageKeys);
         },
         [cleanupAssetImages],
     );
@@ -497,11 +500,16 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     }, [previewNodeId, getBatchGroupNodes]);
 
     useEffect(() => () => {
+        const storageKeys = historyCleanupKeysRef.current;
+        collectImageStorageKeys([historyRef.current, lastHistoryRef.current], new Set(), undefined, storageKeys).forEach((key) => storageKeys.set(key, key));
+        historyCleanupKeysRef.current = new Map<string, string>();
         if (historyCleanupTimerRef.current) {
             clearTimeout(historyCleanupTimerRef.current);
             historyCleanupTimerRef.current = null;
         }
-    }, [projectId]);
+        const usedKeys = collectImageStorageKeys(nodesRef.current, new Set(), storageKeys);
+        if (Array.from(storageKeys.values()).some((key) => !usedKeys.has(key))) cleanupAssetImages({ nodes: nodesRef.current }, storageKeys, useUserStore.getState().token);
+    }, [cleanupAssetImages, projectId]);
 
     useEffect(() => {
         if (!hydrated) return;
@@ -571,8 +579,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             const current = createHistoryEntry();
             const last = lastHistoryRef.current;
             if (!last) return;
-            const historyDropped = historyRef.current.past.length >= 50;
-            historyRef.current.past = [...historyRef.current.past.slice(-49), last];
+            const historyDropped = historyRef.current.past.length >= 10 || historyRef.current.future.length > 0;
+            if (historyDropped) collectImageStorageKeys([historyRef.current.past.slice(0, -9), historyRef.current.future], new Set(), undefined, historyCleanupKeysRef.current).forEach((key) => historyCleanupKeysRef.current.set(key, key));
+            historyRef.current.past = [...historyRef.current.past.slice(-9), last];
             historyRef.current.future = [];
             setHistoryState({ canUndo: true, canRedo: false });
             lastHistoryRef.current = current;
@@ -581,7 +590,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 if (historyCleanupTimerRef.current) clearTimeout(historyCleanupTimerRef.current);
                 historyCleanupTimerRef.current = setTimeout(() => {
                     historyCleanupTimerRef.current = null;
-                    cleanupCanvasFiles();
+                    const storageKeys = historyCleanupKeysRef.current;
+                    historyCleanupKeysRef.current = new Map<string, string>();
+                    cleanupCanvasFiles(undefined, storageKeys);
                 }, 2000);
             }
         }, 180);
@@ -1124,6 +1135,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         batchChildIds: childIds,
                         primaryImageId,
                         content: primaryNode?.metadata?.content || nextNode.metadata.content,
+                        storageKey: primaryNode?.metadata?.content ? primaryNode.metadata.storageKey : nextNode.metadata.storageKey,
+                        bytes: primaryNode?.metadata?.content ? primaryNode.metadata.bytes : nextNode.metadata.bytes,
+                        mimeType: primaryNode?.metadata?.content ? primaryNode.metadata.mimeType : nextNode.metadata.mimeType,
                         naturalWidth: primaryNode?.metadata?.naturalWidth || nextNode.metadata.naturalWidth,
                         naturalHeight: primaryNode?.metadata?.naturalHeight || nextNode.metadata.naturalHeight,
                         panoramaProjection: primaryNode?.metadata?.panoramaProjection || nextNode.metadata.panoramaProjection,
@@ -1996,6 +2010,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         metadata: {
                             ...node.metadata,
                             content: child.metadata?.content,
+                            storageKey: child.metadata?.storageKey,
+                            bytes: child.metadata?.bytes,
+                            mimeType: child.metadata?.mimeType,
                             primaryImageId: child.id,
                             naturalWidth: child.metadata?.naturalWidth,
                             naturalHeight: child.metadata?.naturalHeight,
@@ -3112,7 +3129,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     const frameReferencesEnabled = supportsVideoFrameReferences(videoGenerationConfig.model, channelProtocolForConfig(videoGenerationConfig));
                     const firstFrame = frameReferencesEnabled ? generationContext.firstFrame : null;
                     const lastFrame = frameReferencesEnabled ? generationContext.lastFrame : null;
-                    const videoReferenceImages = frameReferencesEnabled ? generationContext.referenceImages : [...generationContext.referenceImages, ...[generationContext.firstFrame, generationContext.lastFrame].filter((image): image is ReferenceImage => Boolean(image))];
+                    const videoReferenceImages = frameReferencesEnabled || isAutoDLConfig(videoGenerationConfig) ? generationContext.referenceImages : [...generationContext.referenceImages, ...[generationContext.firstFrame, generationContext.lastFrame].filter((image): image is ReferenceImage => Boolean(image))];
                     const spec = nodeSizeFromRatio(videoGenerationConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
                     const videoId = isEmptyVideoNode ? nodeId : nanoid();
@@ -3136,7 +3153,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 }
 
                 if (mode === "audio") {
-                    const referenceAudio = selectMiMoVoiceCloneReference(generationConfig, sourceNode?.metadata, generationContext.referenceAudios);
+                    const referenceAudio = selectAudioReference(generationConfig, sourceNode?.metadata, generationContext.referenceAudios);
                     const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
                     const isEmptyAudioNode = sourceNode?.type === CanvasNodeType.Audio && !sourceNode.metadata?.content;
                     const audioId = isEmptyAudioNode ? nodeId : nanoid();
@@ -3712,7 +3729,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || ""));
             const prompt = (isPanorama ? savedImageMetadata?.panoramaFinalPrompt || "" : savedImageMetadata?.prompt || context?.prompt || "").trim();
             const requestPrompt = isPanorama ? prompt : applyCameraPrompt(prompt, savedImageMetadata?.cameraControl || node.metadata?.cameraControl);
-            if (!prompt) {
+            if (!prompt && !(node.type === CanvasNodeType.Video && isAutoDLConfig(generationConfig))) {
                 message.warning("找不到提示词，无法重试");
                 return;
             }
@@ -3750,13 +3767,13 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     const frameReferencesEnabled = supportsVideoFrameReferences(videoGenerationConfig.model, channelProtocolForConfig(videoGenerationConfig));
                     const firstFrame = frameReferencesEnabled ? context?.firstFrame || null : null;
                     const lastFrame = frameReferencesEnabled ? context?.lastFrame || null : null;
-                    const references = frameReferencesEnabled ? retryImages : [...retryImages, ...[context?.firstFrame, context?.lastFrame].filter((image): image is ReferenceImage => Boolean(image))];
+                    const references = frameReferencesEnabled || isAutoDLConfig(videoGenerationConfig) ? retryImages : [...retryImages, ...[context?.firstFrame, context?.lastFrame].filter((image): image is ReferenceImage => Boolean(image))];
                     const created = await createVideoGenerationTask(videoGenerationConfig, requestPrompt, { references, firstFrame, lastFrame, videoReferences: context?.referenceVideos || [], audioReferences: context?.referenceAudios || [] }, undefined, { clientTaskId: retryVideoTaskId, source: "canvas", sourceId: node.id });
                     setNodes((prev) => applyCanvasVideoTaskUpdate(prev, node.id, created.task, videoGenerationConfig, retryStartedAt, { width: node.width, height: node.height }));
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {
-                    const referenceAudio = selectMiMoVoiceCloneReference(generationConfig, sourceNode?.metadata, context?.referenceAudios || []);
+                    const referenceAudio = selectAudioReference(generationConfig, sourceNode?.metadata, context?.referenceAudios || []);
                     const task = await createCanvasAudioTask(generationConfig, prompt, { nodeId: node.id, sourceId: projectId, clientTaskId: retryAudioTaskId }, referenceAudio);
                     setNodes((prev) => applyCanvasAudioTaskUpdate(prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, prompt, ...buildAudioGenerationMetadata(generationConfig, sourceNode?.metadata) } } : item)), node.id, task, retryStartedAt));
                     return;
@@ -5005,12 +5022,14 @@ function buildAudioGenerationMetadata(config: AiConfig, sourceMetadata?: CanvasN
         mimoVoiceDesignPrompt: config.mimoVoiceDesignPrompt,
         geminiTtsVoice: config.geminiTtsVoice,
         mimoVoiceCloneAudioNodeId: sourceMetadata?.mimoVoiceCloneAudioNodeId,
+        referenceAudioNodeId: sourceMetadata?.referenceAudioNodeId,
     };
 }
 
-function selectMiMoVoiceCloneReference(config: AiConfig, metadata: CanvasNodeMetadata | undefined, references: ReferenceAudio[]) {
-    if (!isMimoVoiceCloneModel(config.model || config.audioModel)) return undefined;
-    const selectedId = metadata?.mimoVoiceCloneAudioNodeId || "";
+function selectAudioReference(config: AiConfig, metadata: CanvasNodeMetadata | undefined, references: ReferenceAudio[]) {
+    const autodl = isAutoDLConfig(config, config.model || config.audioModel);
+    if (!autodl && !isMimoVoiceCloneModel(config.model || config.audioModel)) return undefined;
+    const selectedId = (autodl ? metadata?.referenceAudioNodeId : metadata?.mimoVoiceCloneAudioNodeId) || "";
     if (selectedId) {
         const selected = references.find((item) => item.id === selectedId);
         if (selected) return selected;
@@ -5219,6 +5238,7 @@ function applyCanvasImageTaskUpdate(nodes: CanvasNodeData[], nodeId: string, tas
             imageTaskId: task.id || node.metadata?.imageTaskId,
         };
         if (!completed || !url) return { ...node, metadata };
+        const stored = task.imageStorage?.find((image) => image?.url === url);
         const isPanorama = isPanoramaNodeType(node.type);
         const requestedSize = nodeSizeFromRatio(node.metadata?.size || "", fallbackSize.width, fallbackSize.height);
         const naturalWidth = task.width || requestedSize?.width || fallbackSize.width || node.width;
@@ -5234,8 +5254,8 @@ function applyCanvasImageTaskUpdate(nodes: CanvasNodeData[], nodeId: string, tas
                 content: url,
                 storageKey: task.storageKey || "",
                 status: NODE_STATUS_SUCCESS,
-                naturalWidth,
-                naturalHeight,
+                naturalWidth: stored?.width || naturalWidth,
+                naturalHeight: stored?.height || naturalHeight,
                 bytes: task.bytes || 0,
                 mimeType: task.mimeType || "image/png",
                 progress: 100,
@@ -5249,6 +5269,7 @@ function applyCanvasImageTaskUpdate(nodes: CanvasNodeData[], nodeId: string, tas
     const childIds = canvasImageTaskChildIds(nodeId, task);
     const childNodes = urls.map((url, index): CanvasNodeData => {
         const id = childIds[index];
+        const stored = task.imageStorage?.find((image) => image?.url === url);
         return {
             ...root,
             id,
@@ -5261,9 +5282,11 @@ function applyCanvasImageTaskUpdate(nodes: CanvasNodeData[], nodeId: string, tas
                 content: url,
                 status: NODE_STATUS_SUCCESS,
                 progress: 100,
-                storageKey: "",
-                mimeType: "image/png",
-                bytes: 0,
+                storageKey: stored?.storageKey || "",
+                mimeType: stored?.mimeType || "image/png",
+                bytes: stored?.bytes || 0,
+                naturalWidth: stored?.width || root.metadata?.naturalWidth,
+                naturalHeight: stored?.height || root.metadata?.naturalHeight,
                 imageTaskId: undefined,
                 imageTaskResultId: task.id,
                 isBatchRoot: undefined,

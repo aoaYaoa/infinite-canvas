@@ -518,6 +518,7 @@ export function AppConfigModal() {
             </Modal>
             {modelSelectChannel ? (
                 <ChannelModelSelectorModal
+                    channel={modelSelectChannel}
                     models={modelSelectChannel.models}
                     onCancel={closeLocalModelSelector}
                     onConfirm={confirmLocalModelSelector}

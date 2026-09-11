@@ -421,16 +421,22 @@ func repairDefaultModel(current string, models []string, preferred func(string) 
 
 func isVideoModelName(modelName string) bool {
 	name := strings.ToLower(strings.TrimSpace(modelName))
+	if kind := AutoDLModelKind(modelName); kind != "unsupported" {
+		return kind == "video"
+	}
 	return name == "minimax-h3" || strings.Contains(name, "seedance") || strings.Contains(name, "video") || strings.Contains(name, "sd2.0 720p") || strings.Contains(name, "sd2.5 720p")
 }
 
 func isImageModelName(modelName string) bool {
+	if AutoDLModelKind(modelName) != "unsupported" {
+		return false
+	}
 	name := strings.ToLower(strings.TrimSpace(modelName))
 	return strings.Contains(name, "seedream") || strings.Contains(name, "gpt-image") || strings.Contains(name, "image")
 }
 
 func isTextModelName(modelName string) bool {
-	return !isImageModelName(modelName) && !isVideoModelName(modelName)
+	return AutoDLModelKind(modelName) != "audio" && !isImageModelName(modelName) && !isVideoModelName(modelName)
 }
 
 func normalizeModelChannel(channel model.ModelChannel) model.ModelChannel {
