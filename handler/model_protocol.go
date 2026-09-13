@@ -321,17 +321,22 @@ var builtinAIProtocols = []aiProtocolAdapter{
 		},
 	},
 	{
-		id: "model:ark-seedance",
-		path: func(channel model.ModelChannel, modelName string, path string) (string, bool) {
-			if isArkSeedanceVideo(channel.BaseURL, modelName) {
-				if path == "/videos" {
-					return "/contents/generations/tasks", true
-				}
-				if strings.HasPrefix(path, "/videos/") && !strings.HasSuffix(path, "/content") {
-					return "/contents/generations/tasks/" + strings.TrimPrefix(path, "/videos/"), true
-				}
+		id: service.ModelChannelProtocolArk,
+		path: func(channel model.ModelChannel, _ string, path string) (string, bool) {
+			if !service.IsArkChannel(channel) {
+				return path, false
 			}
-			return path, false
+			if path == "/videos" {
+				return "/contents/generations/tasks", true
+			}
+			if strings.HasPrefix(path, "/videos/") && !strings.HasSuffix(path, "/content") {
+				return "/contents/generations/tasks/" + strings.TrimPrefix(path, "/videos/"), true
+			}
+			return path, true
+		},
+		prepare: prepareArkSeedanceRequest,
+		uploads: func(model.ModelChannel, map[string]bool) (map[string]directAIUpload, error) {
+			return nil, nil
 		},
 	},
 	{

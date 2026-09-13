@@ -1,3 +1,4 @@
+import { readFileAsDataUrl } from "@/lib/image-utils";
 import { apiPost } from "@/services/api/request";
 import { resolveMediaUrl, uploadRemoteMediaToServer } from "@/services/file-storage";
 import { resolveImageUrl } from "@/services/image-storage";
@@ -253,6 +254,10 @@ async function uploadAndReplaceReferences(protocol: DirectProtocolAdapter, plan:
     const uploaded = new Map<string, string>();
     await Promise.all(retained.map(async (reference) => {
         const spec = plan.uploads?.[reference.kind];
+        if (!spec && plan.provider === "ark" && reference.kind === "image") {
+            uploaded.set(reference.marker, await readFileAsDataUrl(reference.file));
+            return;
+        }
         if (!spec) throw new Error(`${plan.provider} 不支持上传本地${directReferenceKindName(reference.kind)}`);
         uploaded.set(reference.marker, await uploadDirectReference(protocol, spec, reference.file, apiKey));
     }));

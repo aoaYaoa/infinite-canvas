@@ -303,7 +303,9 @@ async function create88APIVideoRequestBody(config: AiConfig, model: string, prom
         model,
         prompt,
         seconds: normalizeVideoSecondsForModel(model, config.videoSeconds),
-        generate_audio: boolConfig(config.videoGenerateAudio, false),
+        ...(supportsVideoAudioGeneration(model, "88api")
+            ? { generate_audio: boolConfig(config.videoGenerateAudio, false) }
+            : {}),
     };
     if (images.length) body.images = images;
     if (geminiOmni && videos[0]) body.video = videos[0];
@@ -338,6 +340,7 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
         };
     }
     if (videoChannelProtocol(config, model) === "88api") return create88APIVideoRequestBody(config, model, prompt, input);
+    if (videoChannelProtocol(config, model) === "ark") return createArkSeedanceVideoRequestBody(config, model, prompt, input);
     const size = normalizeVideoSize(config.size);
     if (isGeminiVideoModel(model) && isGeminiConfig(config, model)) return createGeminiVeoRequestBody(config, model, prompt, input);
     if (isGrok2APIVideoConfig(config, model)) return createGrok2APIVideoRequestBody(config, model, prompt, input);
@@ -423,6 +426,30 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
     const audioFiles = kling ? [] : await Promise.all(input.audioReferences.map(mediaReferenceToFormValue));
     audioFiles.forEach((file) => body.append("audio_reference[]", file));
     return body;
+}
+
+async function createArkSeedanceVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
+    const [images, firstFrame, lastFrame] = await Promise.all([
+        Promise.all(input.references.map(imageToAgnesReference)),
+        input.firstFrame ? imageToAgnesReference(input.firstFrame) : "",
+        input.lastFrame ? imageToAgnesReference(input.lastFrame) : "",
+    ]);
+    const videos = input.videoReferences.map((item) => item.url).filter(Boolean);
+    const audios = input.audioReferences.map((item) => item.url).filter(Boolean);
+    return {
+        model,
+        prompt,
+        seconds: normalizeSeedanceDuration(config.videoSeconds, modelKey(model).includes("seedance-2-5") ? 30 : 15),
+        size: normalizeSeedanceRatio(config.size),
+        resolution_name: normalizeVideoResolution(config.vquality),
+        video_generate_audio: boolConfig(config.videoGenerateAudio, false),
+        video_watermark: boolConfig(config.videoWatermark, false),
+        ...(images.length ? { "input_reference[]": images } : {}),
+        ...(firstFrame ? { first_frame_url: firstFrame } : {}),
+        ...(lastFrame ? { last_frame_url: lastFrame } : {}),
+        ...(videos.length ? { "video_reference[]": videos } : {}),
+        ...(audios.length ? { "audio_reference[]": audios } : {}),
+    };
 }
 
 async function createMiniMaxH3VideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
@@ -724,7 +751,7 @@ function normalizeVideoSecondsForModel(model: string, value: string) {
     const seconds = Number(normalizeVideoSeconds(value));
     const key = modelKey(model);
     if (key.includes("sora-2")) return closestAllowedSeconds(seconds, [4, 8, 12, 16, 20]);
-    if (key.includes("veo3-1") || key.includes("veo-3-1")) return "8";
+    if (key.includes("veo3-1") || key.includes("veo-3-1")) return closestAllowedSeconds(seconds, [4, 6, 8]);
     if (key.includes("minimax-hailuo-02")) return closestAllowedSeconds(seconds, [5, 10]);
     if (key.includes("minimax-hailuo-2-3")) return closestAllowedSeconds(seconds, [6, 10]);
     if (key.includes("omni-flash-ext")) return closestAllowedSeconds(seconds, [4, 6, 8, 10]);

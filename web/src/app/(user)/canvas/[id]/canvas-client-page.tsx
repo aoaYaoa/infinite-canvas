@@ -3110,14 +3110,12 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         }),
                     );
                     const hasSuccess = taskResults.some(Boolean);
-                    const hasFailure = taskResults.some((result) => !result);
-                    if (hasFailure) message.error(hasSuccess ? "部分图片任务创建失败" : "全部图片任务创建失败");
                     setNodes((prev) =>
                         prev.map((node) =>
                             node.id === nodeId && isConfigNode
-                                ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : "全部图片任务创建失败" } }
+                                ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR } }
                                 : node.id === rootId && !hasSuccess
-                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: "全部图片任务创建失败" } }
+                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR } }
                                     : node,
                         ),
                     );
@@ -4395,6 +4393,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             onChange={([start, end]) => {
                                 if (Math.round((end - start) * 100) < 50) return;
                                 audioTrimRef.current?.pause();
+                                if (audioTrimRef.current) audioTrimRef.current.currentTime = start;
                                 setAudioTrimStart(start);
                                 setAudioTrimEnd(end);
                             }}
@@ -4522,6 +4521,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     agentConfig={resolvedAgentConfig}
                     width={agentPanel.width}
                     onWidthChange={(width) => setAgentPanel((current) => ({ ...current, width }))}
+                    onFocusNode={focusNode}
                     onSessionsChange={handleAssistantSessionsChange}
                     onAgentConfigChange={handleAgentConfigChange}
                     onPasteImage={pasteAssistantImage}
