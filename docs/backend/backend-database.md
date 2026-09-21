@@ -50,7 +50,7 @@ description: 当前后端主要数据表与字段说明
 | `display_name` | string | 昵称 |
 | `avatar_url` | string | 头像地址 |
 | `role` | string | 角色：`user`、`admin` |
-| `credits` | number | 算力点余额 |
+| `credits` | decimal(20,2) | 算力点余额 |
 | `aff_code` | string | 用户自己的邀请码，唯一索引 |
 | `aff_count` | number | 已邀请用户数量，冗余统计字段 |
 | `inviter_id` | string | 邀请人用户 ID |
@@ -199,7 +199,7 @@ S3/R2 与 WebDAV 共用的媒体文件索引表，不保存画布、素材列表
 | `request_body` | text | 创建任务时的请求摘要 |
 | `response_body` | text | 创建任务时的响应摘要 |
 | `last_response` | text | 最近一次状态响应摘要 |
-| `credits` | number | 创建任务时预扣算力点 |
+| `credits` | decimal(20,2) | 创建任务时预扣算力点 |
 | `created_at` | string | 创建时间 |
 | `updated_at` | string | 更新时间 |
 | `started_at` | string | 上游开始时间 |
@@ -356,7 +356,7 @@ S3/R2 与 WebDAV 共用的媒体文件索引表，不保存画布、素材列表
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `model` | string | 模型名称 |
-| `credits` | number | 每次后端模型接口调用前预扣的算力点，未配置默认不扣除 |
+| `credits` | number | 图片每张、视频每秒、文本和音频每次调用预扣的算力点，最多保留两位小数；视频智能时长 `-1` 按 15 秒计算，未配置默认不扣除 |
 
 `auth.linuxDo` 当前字段：
 
@@ -410,8 +410,8 @@ S3/R2 与 WebDAV 共用的媒体文件索引表，不保存画布、素材列表
 | `id` | string | 主键 |
 | `user_id` | string | 关联用户 ID |
 | `type` | string | 类型：`admin_adjust`、`ai_consume`、`ai_refund` |
-| `amount` | number | 本次变动数量，增加为正，扣减为负 |
-| `balance` | number | 变动后的用户算力点余额 |
+| `amount` | decimal(20,2) | 本次变动数量，增加为正，扣减为负 |
+| `balance` | decimal(20,2) | 变动后的用户算力点余额 |
 | `related_id` | string | 关联业务 ID，可为空 |
 | `remark` | string | 备注 |
 | `extra` | json | 扩展信息 |

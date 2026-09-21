@@ -127,7 +127,7 @@ export const defaultConfig: AiConfig = {
     videoMultiPrompt: [{ prompt: "", duration: "1" }],
     videoElementList: [{ name: "", description: "", references: [] }],
     vquality: "720",
-    videoGenerateAudio: "false",
+    videoGenerateAudio: "true",
     videoWatermark: "false",
     videoCharacterOrientation: "video",
     systemPrompt: "",
@@ -237,7 +237,7 @@ function isVideoModelName(model: string) {
         value.includes("veo") ||
         value.includes("kling") ||
         value.includes("hailuo") ||
-        value.includes("minimax") ||
+        (value.includes("minimax") && value !== "minimax-m3") ||
         value.includes("skyreels") ||
         value.includes("happyhorse") ||
         value.includes("runway") ||
@@ -450,7 +450,7 @@ export const useConfigStore = create<ConfigStore>()(
                         videoMultiPrompt: Array.isArray(config.videoMultiPrompt) && config.videoMultiPrompt.length ? config.videoMultiPrompt : defaultConfig.videoMultiPrompt,
                         videoElementList: Array.isArray(config.videoElementList) && config.videoElementList.length ? config.videoElementList : defaultConfig.videoElementList,
                         vquality: config.vquality || "720",
-                        videoGenerateAudio: config.videoGenerateAudio || "false",
+                        videoGenerateAudio: config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
                         videoWatermark: config.videoWatermark || "false",
                         videoCharacterOrientation: config.videoCharacterOrientation === "image" ? "image" : "video",
                         canvasImageCount: config.canvasImageCount || "1",

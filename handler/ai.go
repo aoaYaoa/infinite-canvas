@@ -141,7 +141,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		failAIChannelSelect(w, err, "AI 接口请求失败")
 		return
 	}
-	credits := 0
+	credits := 0.0
 	if userChannelID == "" {
 		credits, err = service.ModelCost(modelName)
 		if err != nil {
@@ -149,7 +149,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 			Fail(w, "AI 接口请求失败")
 			return
 		}
-		credits *= readAIRequestCount(body, contentType)
+		credits *= float64(readAIRequestCount(body, contentType, false))
 	}
 	upstreamPath := resolveAIProxyPath(channel, modelName, path)
 	prepared, _, err := prepareAIProtocolRequest(aiProtocolRequest{
@@ -195,7 +195,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	}, func() {
 		if credits > 0 {
 			if err := service.RefundUserCredits(user.ID, modelName, credits, upstreamPath); err != nil {
-				log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%d err=%v", user.ID, modelName, credits, err)
+				log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%g err=%v", user.ID, modelName, credits, err)
 			}
 		}
 	})
@@ -216,7 +216,7 @@ type aiLogContext struct {
 	Channel         model.ModelChannel
 	UserID          string
 	UserDisplayName string
-	Credits         int
+	Credits         float64
 	RequestBody     string
 }
 
@@ -457,8 +457,9 @@ func readMultipartModel(body []byte, contentType string) string {
 	return ""
 }
 
-func readAIRequestCount(body []byte, contentType string) int {
+func readAIRequestCount(body []byte, contentType string, video bool) int {
 	count := 1
+	var videoPayload map[string]any
 	if strings.HasPrefix(contentType, "multipart/form-data") {
 		_, params, err := mime.ParseMediaType(contentType)
 		if err != nil {
@@ -469,8 +470,26 @@ func readAIRequestCount(body []byte, contentType string) int {
 			return count
 		}
 		defer form.RemoveAll()
-		if values := form.Value["n"]; len(values) > 0 {
+		if video {
+			count = 0
+			for _, field := range []string{"seconds", "duration"} {
+				if values := form.Value[field]; len(values) > 0 {
+					if _, err := fmt.Sscan(values[0], &count); err == nil && count != 0 {
+						break
+					}
+				}
+			}
+		} else if values := form.Value["n"]; len(values) > 0 {
 			_, _ = fmt.Sscan(values[0], &count)
+		}
+	} else if video {
+		count = 0
+		if json.Unmarshal(body, &videoPayload) == nil {
+			for _, field := range []string{"seconds", "duration", "parameters.durationSeconds"} {
+				if _, err := fmt.Sscan(readStringPath(videoPayload, field), &count); err == nil && count != 0 {
+					break
+				}
+			}
 		}
 	} else {
 		var payload struct {
@@ -478,6 +497,16 @@ func readAIRequestCount(body []byte, contentType string) int {
 		}
 		_ = json.Unmarshal(body, &payload)
 		count = payload.N
+	}
+	if video && count == -1 {
+		return 15
+	}
+	if video && count < 1 {
+		frames := readIntPath(videoPayload, "num_frames")
+		frameRate := readIntPath(videoPayload, "frame_rate")
+		if frames > 1 && frameRate > 0 {
+			count = (frames - 1 + frameRate - 1) / frameRate
+		}
 	}
 	if count < 1 {
 		return 1

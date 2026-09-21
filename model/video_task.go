@@ -22,7 +22,7 @@ type VideoTask struct {
 	RequestBody     string `json:"requestBody" gorm:"type:text"`
 	ResponseBody    string `json:"responseBody" gorm:"type:text"`
 	LastResponse    string `json:"lastResponse" gorm:"type:text"`
-	Credits         int    `json:"credits"`
+	Credits         float64 `json:"credits" gorm:"type:decimal(20,2)"`
 	CreatedAt       string `json:"createdAt" gorm:"index;index:idx_video_tasks_status_created_at,priority:2"`
 	UpdatedAt       string `json:"updatedAt" gorm:"index"`
 	StartedAt       string `json:"startedAt"`

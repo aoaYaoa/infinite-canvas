@@ -75,7 +75,7 @@ export async function deleteAdminUser(token: string, id: string) {
     return apiDelete<boolean>(`/api/admin/users/${encodeURIComponent(id)}`, token);
 }
 
-export async function fetchAdminCreditLogs(token: string, query: AdminUserQuery = {}) {
+export async function fetchAdminCreditLogs(token: string, query: AdminUserQuery & { date?: string } = {}) {
     return apiGet<AdminCreditLogListResponse>("/api/admin/credit-logs", compactApiParams(query), token);
 }
 

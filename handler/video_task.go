@@ -72,7 +72,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		failAIChannelSelect(w, err, "AI 接口请求失败")
 		return
 	}
-	credits := 0
+	credits := 0.0
 	if userChannelID == "" {
 		credits, err = service.ModelCost(modelName)
 		if err != nil {
@@ -80,7 +80,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 			Fail(w, "AI 接口请求失败")
 			return
 		}
-		credits *= readAIRequestCount(body, contentType)
+		credits *= float64(readAIRequestCount(body, contentType, true))
 	}
 	upstreamPath := resolveAIProxyPath(channel, modelName, "/videos")
 	body, contentType, err = normalizeVideoCreateBody(body, contentType, modelName, channel, upstreamPath)
@@ -441,7 +441,7 @@ func parseVideoTaskPayload(payload []byte, modelName string) parsedVideoTaskPayl
 		Progress:        readIntPath(data, "progress"),
 		Seconds:         firstNonEmpty(readStringPath(data, "seconds"), readStringPath(data, "duration")),
 		Size:            firstNonEmpty(readStringPath(data, "size"), readSizeFromDimensions(data)),
-		VideoURL:        firstNonEmpty(readStringPath(data, "video_url"), readStringPath(data, "url"), readStringPath(data, "remixed_from_video_id"), readStringPath(data, "output_url"), readStringPath(data, "download_url"), readStringPath(data, "content.video_url"), findFirstHTTPURL(data)),
+		VideoURL:        firstNonEmpty(readStringPath(data, "video_url"), readStringPath(data, "url"), readStringPath(data, "video.url"), readStringPath(data, "remixed_from_video_id"), readStringPath(data, "output_url"), readStringPath(data, "download_url"), readStringPath(data, "content.video_url"), findFirstHTTPURL(data)),
 		Error:           firstNonEmpty(readStringPath(data, "error.message"), readStringPath(data, "error")),
 		ErrorDetail:     "",
 	}
@@ -594,8 +594,8 @@ func findFirstHTTPURL(value any) string {
 	return ""
 }
 
-func refundVideoCredits(userID string, modelName string, credits int, endpoint string) {
+func refundVideoCredits(userID string, modelName string, credits float64, endpoint string) {
 	if err := service.RefundUserCredits(userID, modelName, credits, endpoint); err != nil {
-		log.Printf("AI video refund credits failed: user=%s model=%s credits=%d err=%v", userID, modelName, credits, err)
+		log.Printf("AI video refund credits failed: user=%s model=%s credits=%g err=%v", userID, modelName, credits, err)
 	}
 }

@@ -463,12 +463,12 @@ export default function AdminSettingsPage() {
                                             columns={[
                                                 { title: "模型", dataIndex: "model", render: (value: string) => <span title={value}>{publicModelLabel(value)}</span> },
                                                 {
-                                                    title: "每次调用扣除",
+                                                    title: "计费单价（视频按秒）",
                                                     dataIndex: "credits",
                                                     width: 220,
                                                     render: (_, item) => (
                                                         <Space.Compact className="!w-full">
-                                                            <InputNumber min={0} step={1} precision={0} className="!w-full" value={item.credits} onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)} />
+                                                            <InputNumber min={0} step={0.01} precision={2} className="!w-full" value={item.credits} onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)} />
                                                             <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
                                                                 点
                                                             </span>

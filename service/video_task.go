@@ -46,7 +46,7 @@ type VideoTaskCreateInput struct {
 	ErrorDetail     string
 	RequestBody     string
 	ResponseBody    string
-	Credits         int
+	Credits         float64
 }
 
 type VideoTaskPollUpdate struct {
@@ -90,7 +90,7 @@ func CreateVideoTask(input VideoTaskCreateInput) (model.VideoTask, error) {
 		RequestBody:     input.RequestBody,
 		ResponseBody:    input.ResponseBody,
 		LastResponse:    input.ResponseBody,
-		Credits:         input.Credits,
+		Credits:         normalizeCredits(input.Credits),
 		CreatedAt:       current,
 		UpdatedAt:       current,
 	}

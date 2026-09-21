@@ -171,6 +171,7 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 		if setting.ModelChannel.ModelCosts[i].Credits < 0 {
 			setting.ModelChannel.ModelCosts[i].Credits = 0
 		}
+		setting.ModelChannel.ModelCosts[i].Credits = normalizeCredits(setting.ModelChannel.ModelCosts[i].Credits)
 	}
 	if setting.ModelChannel.AllowCustomChannel == nil {
 		enabled := true
@@ -192,7 +193,7 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 	return setting
 }
 
-func ModelCost(modelName string) (int, error) {
+func ModelCost(modelName string) (float64, error) {
 	settings, err := repository.GetSettings()
 	if err != nil {
 		return 0, err

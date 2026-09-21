@@ -410,7 +410,7 @@ function parseServerSentEventBlock(block: string) {
     return JSON.parse(data) as Record<string, unknown>;
 }
 
-async function readJsonServerSentEvents(response: Response, onEvent: (event: Record<string, unknown>) => void) {
+export async function readJsonServerSentEvents(response: Response, onEvent: (event: Record<string, unknown>) => void) {
     if (!response.body) throw new ImageRequestError("接口未返回可读取的流式响应", `${response.status} ${response.statusText}`);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -450,7 +450,7 @@ async function readJsonServerSentEvents(response: Response, onEvent: (event: Rec
     return events;
 }
 
-function isEventStreamResponse(response: Response) {
+export function isEventStreamResponse(response: Response) {
     return response.headers.get("Content-Type")?.toLowerCase().includes("text/event-stream") ?? false;
 }
 
@@ -1222,6 +1222,25 @@ export async function fetchImageModels(config: AiConfig) {
     if (channel?.protocol === "autodl") return (await fetchAutoDLWorkflows(channel.baseUrl)).map((workflow) => workflow.uuid);
     if (isMiniMaxChannel(channel)) return [...miniMaxModels];
     if (isMimoChannel(channel || { baseUrl: config.baseUrl })) return [...mimoModels];
+    if (channel?.protocol === "ark" && buildApiUrl(channel.baseUrl, "").toLowerCase().endsWith("/api/plan/v3")) return [
+        "doubao-seed-2.0-mini",
+        "doubao-seed-2.0-lite",
+        "deepseek-v4-flash",
+        "glm-5.3-flash",
+        "doubao-seed-2.1-turbo",
+        "doubao-seed-evolving",
+        "minimax-m3",
+        "glm-5.3",
+        "kimi-k2.7-code",
+        "deepseek-v4-pro",
+        "kimi-k3",
+        "deepseek-v4.1-flash",
+        "doubao-seedance-2.5",
+        "doubao-seedance-2.0",
+        "doubao-seedance-2.0-fast",
+        "doubao-seedance-2.0-mini",
+        "doubao-seedance-1.5-pro",
+    ];
     try {
         const response = await axios.get<{ data?: Array<{ id?: string }>; error?: { message?: string } }>(buildApiUrl(config.baseUrl, "/models"), {
             headers: {
