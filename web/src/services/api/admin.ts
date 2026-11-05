@@ -1,4 +1,5 @@
 import type { ModelChannelProtocol } from "@/lib/model-channel";
+import type { ModelCapabilities } from "@/stores/use-config-store";
 import type { WorkflowEntry, WorkflowSummary } from "@/lib/workflow-channel";
 import { apiDelete, apiGet, apiPost, compactApiParams } from "@/services/api/request";
 import type { Prompt, PromptListResponse } from "@/services/api/prompts";
@@ -21,9 +22,6 @@ export type AdminUser = {
     avatarUrl: string;
     role: "user" | "admin";
     credits: number;
-    affCode: string;
-    affCount: number;
-    inviterId: string;
     linuxDoId: string;
     status: "active" | "ban";
     lastLoginAt: string;
@@ -187,6 +185,8 @@ export type AdminModelChannel = {
     baseUrl: string;
     apiKey: string;
     models: string[];
+    modelCapabilities?: ModelCapabilities;
+    parameterTranslation?: string;
     weight: number;
     timeout: number;
     enabled: boolean;
@@ -221,15 +221,18 @@ export type AdminPublicModelChannelSettings = {
 
 export type AdminModelCost = {
     model: string;
+    resolution?: string;
     credits: number;
 };
 
 export type AdminPublicModelChannelInfo = {
+	parameterTranslationModels?: string[];
     id: string;
     protocol: AdminModelChannel["protocol"];
     name: string;
     baseUrl: string;
     models: string[];
+    modelCapabilities?: ModelCapabilities;
     weight: number;
     timeout: number;
     enabled: boolean;
@@ -256,8 +259,10 @@ export type AdminStorageProvider = {
     name: string;
     type: "s3" | "webdav";
     endpoint: string;
+    allowPrivateNetwork?: boolean;
     region: string;
     bucket: string;
+    bucketInHost: boolean;
     accessKeyId: string;
     secretAccessKey: string;
     publicBaseUrl: string;
@@ -317,6 +322,7 @@ export type AdminAICallLog = {
     channelId: string;
     channelName: string;
     status: number;
+    failed: boolean;
     durationMs: number;
     credits: number;
     requestBody: string;

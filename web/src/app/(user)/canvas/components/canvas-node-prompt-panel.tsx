@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowUp, LoaderCircle, Maximize2 } from "lucide-react";
+import { ArrowUp, LoaderCircle, Maximize2, Square } from "lucide-react";
 import { Button, Modal, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -32,6 +32,7 @@ type CanvasNodePromptPanelProps = {
     onPromptChange: (nodeId: string, prompt: string) => void;
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void;
     onGenerate: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => void;
+    onStop: (nodeId: string) => void;
     mentionReferences?: CanvasResourceReference[];
     connectedNodes?: CanvasNodeData[];
     onDisconnectReference?: (fromNodeId: string, toNodeId: string) => void;
@@ -41,7 +42,7 @@ type CanvasNodePromptPanelProps = {
     onImageSettingsOpenChange?: (open: boolean) => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -50,6 +51,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const config = buildNodeConfig(globalConfig, node, mode);
     const { data: autodlWorkflow } = useAutoDLWorkflow(config, mode === "video" ? config.model : "");
     const isPanorama = isPanoramaNodeType(node.type);
+    const textOverwrite = node.type === CanvasNodeType.Text && globalConfig.nodeRegenerateBehavior === "overwrite" && Boolean(node.metadata?.clientTaskId);
+    const mediaLoading = (isCanvasImageNodeType(node.type) || node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio || textOverwrite) && node.metadata?.status === "loading";
+    const isStopping = node.metadata?.status === "stopping";
+    const stopFailed = isStopping && Boolean(node.metadata?.errorDetails);
+    const canStop = Boolean(node.metadata?.clientTaskId) && !node.metadata?.isBatchRoot && (mediaLoading || stopFailed);
+    const generating = (isRunning && node.metadata?.status !== "stopped") || mediaLoading;
+    const showStop = canStop || isStopping;
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = isCanvasImageNodeType(node.type) && Boolean(node.metadata?.content);
     const sourcePrompt = isPanorama ? node.metadata?.panoramaSourcePrompt || "" : node.metadata?.prompt || "";
@@ -59,7 +67,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const billingModel = workflowRef
         ? `workflow:${workflowRef.scope}:${workflowRef.channelId}:${workflowRef.kind}:${workflowRef.workflowId}`
         : config.model;
-    const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: billingModel, count: mode === "image" ? config.count : 1, seconds: mode === "video" ? config.videoSeconds : undefined });
+    const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: billingModel, resolution: mode === "video" ? config.vquality : undefined, count: mode === "image" ? config.count : 1, seconds: mode === "video" ? config.videoSeconds : undefined });
 
     useEffect(() => {
         setPrompt(sourcePrompt);
@@ -70,13 +78,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         onPromptChange(node.id, value);
     };
 
-    const canSubmit = Boolean(prompt.trim()) || (mode !== "text" && Boolean(node.metadata?.workflowRef)) || (mode === "video" && isAutoDLConfig(config) && getAutoDLCapabilities(autodlWorkflow)?.promptRequired === false) || (isPanorama && (hasImageContent || mentionReferences.length > 0));
+    const canSubmit = node.metadata?.status === "stopped" || Boolean(prompt.trim()) || (mode !== "text" && Boolean(node.metadata?.workflowRef)) || (mode === "video" && isAutoDLConfig(config) && getAutoDLCapabilities(autodlWorkflow)?.promptRequired === false) || (isPanorama && (hasImageContent || mentionReferences.length > 0));
 
     const submit = () => {
         const text = prompt.trim();
-        if (!canSubmit || isRunning) return;
+        if (!canSubmit || generating || isStopping) return;
         onGenerate(node.id, mode, text);
-        if (!isPanorama) setPrompt("");
     };
 
     return (
@@ -94,7 +101,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 references={mentionReferences}
                 onChange={updatePrompt}
                 onSubmit={submit}
-                className="thin-scrollbar h-40 w-full resize-none rounded-xl px-3 py-2 text-sm leading-5 outline-none"
+                className="thin-scrollbar h-32 w-full resize-none rounded-xl px-3 py-2 text-sm leading-5 outline-none"
                 style={{ background: "transparent", color: theme.node.text }}
                 placeholder={isPanorama ? "描述想生成的全景，或上传/连接图片作为参考" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
@@ -131,25 +138,30 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     ) : (
                         <ModelPicker config={config} value={config.model} channelId={config.textChannelId} onChange={(model, channelId) => onConfigChange(node.id, { model, channelId })} capability="text" onMissingConfig={() => openConfigDialog(true)} />
                     )}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
                     {mode === "video" || (mode === "image" && !isPanorama) ? (
                         <CanvasCameraControl value={node.metadata?.cameraControl} onChange={(cameraControl) => onConfigChange(node.id, { cameraControl })} buttonClassName="!h-10 !min-w-[92px] !justify-start !rounded-full !px-3" />
                     ) : null}
-                </div>
                 <Button
                     type="primary"
+                    danger={showStop}
                     className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
-                    disabled={isRunning || !canSubmit}
-                    onClick={submit}
-                    aria-label="生成"
+                    disabled={(isStopping && !stopFailed) || (!canStop && (generating || !canSubmit))}
+                    onClick={canStop ? () => onStop(node.id) : submit}
+                    aria-label={canStop ? stopFailed ? "重试停止" : "停止" : isStopping ? "停止中" : "生成"}
                 >
-                    <span className="flex items-center gap-1.5">
-                        <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums">
-                            <CreditSymbol />
-                            {credits.toLocaleString()}
+                    <span className="relative inline-flex">
+                        <span className={`flex items-center gap-1.5${showStop ? " invisible" : ""}`}>
+                            <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums"><CreditSymbol />{credits.toLocaleString()}</span>
+                            {generating ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
                         </span>
-                        {isRunning ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+                        {showStop ? <span className="absolute inset-0 flex items-center justify-center">
+                            {isStopping && !stopFailed ? <LoaderCircle className="size-4 animate-spin" /> : <Square className="size-3.5" fill="currentColor" />}
+                        </span> : null}
                     </span>
                 </Button>
+                </div>
             </div>
             <Modal title="编辑提示词" open={expanded} centered width={760} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
                 <div data-canvas-no-zoom className="pt-2" onWheelCapture={(event) => event.stopPropagation()}>
@@ -214,6 +226,9 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         mimoTtsFormat: node.metadata?.mimoTtsFormat || globalConfig.mimoTtsFormat || defaultConfig.mimoTtsFormat,
         mimoVoiceDesignPrompt: node.metadata?.mimoVoiceDesignPrompt || globalConfig.mimoVoiceDesignPrompt || defaultConfig.mimoVoiceDesignPrompt,
         geminiTtsVoice: node.metadata?.geminiTtsVoice || globalConfig.geminiTtsVoice || defaultConfig.geminiTtsVoice,
+        miniMaxTtsVoice: node.metadata?.miniMaxTtsVoice || globalConfig.miniMaxTtsVoice || defaultConfig.miniMaxTtsVoice,
+        miniMaxTtsFormat: node.metadata?.miniMaxTtsFormat || globalConfig.miniMaxTtsFormat || defaultConfig.miniMaxTtsFormat,
+        miniMaxTtsSpeed: node.metadata?.miniMaxTtsSpeed || globalConfig.miniMaxTtsSpeed || defaultConfig.miniMaxTtsSpeed,
         count: String(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count),
     };
 }

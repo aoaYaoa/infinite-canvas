@@ -8,13 +8,16 @@ import { useEffect, useMemo, useState } from "react";
 import { EditorView } from "@uiw/react-codemirror";
 
 import { ChannelModelSelectorModal } from "@/components/channel-model-selector-modal";
+import { videoResolutionOptions } from "@/components/video-settings-panel";
 import type { WorkflowChannelSettings } from "@/components/workflow/workflow-channel-pane";
 import { useAutoDLWorkflowNames } from "@/hooks/use-autodl-workflow";
 import { isWorkflowProtocol, modelChannelApiKeyUrls, modelChannelDefaultBaseUrls, modelChannelProtocolOptions } from "@/lib/model-channel";
+import { startTokenDanceOAuth } from "@/lib/tokendance-oauth";
 import { fetchAdminSettings, fetchChannelModels, measureAdminStorageProvider, saveAdminSettings, testChannelModel, type AdminModelChannel, type AdminModelCost, type AdminSettings, type AdminStorageProvider } from "@/services/api/admin";
 import { clearStorageConfigCache as clearMediaStorageConfigCache } from "@/services/file-storage";
 import { clearStorageConfigCache as clearImageStorageConfigCache } from "@/services/image-storage";
 import { useUserStore } from "@/stores/use-user-store";
+import { filterChannelModelsByCapability, useConfigStore, type ModelCapabilities } from "@/stores/use-config-store";
 
 const CodeMirror = dynamic(() => import("@uiw/react-codemirror"), { ssr: false });
 const WorkflowChannelPane = dynamic(() => import("@/components/workflow/workflow-channel-pane").then((module) => module.WorkflowChannelPane), { ssr: false });
@@ -53,8 +56,8 @@ const emptySettings: AdminSettings = {
     private: { channels: [], promptSync: { enabled: true, cron: "0 0 * * *" }, aiLog: { localDirectReportEnabled: false, cleanup: { enabled: false, retentionDays: 14, cron: "0 3 * * *" } }, auth: { linuxDo: { clientId: "", clientSecret: "" } }, storage: { mode: "local_indexeddb", allowUserProvider: false, allowUserGlobalProvider: true, autoSyncAllAssets: false, providers: [], roundRobinCursor: 0, capacityCheck: { enabled: false, cron: "0 */6 * * *" }, capacityLimitBytes: 9 * 1024 * 1024 * 1024 } },
 };
 const emptyChannel: AdminModelChannel = { id: "", protocol: "openai", name: "", baseUrl: modelChannelDefaultBaseUrls.openai, apiKey: "", models: [], weight: 1, timeout: 600, enabled: true, remark: "" };
-const emptyS3StorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "canvas", username: "", password: "", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
-const emptyWebDAVStorageProvider: AdminStorageProvider = { ...emptyS3StorageProvider, name: "", type: "webdav", region: "" };
+const emptyS3StorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", bucketInHost: false, accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "canvas", username: "", password: "", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
+const emptyWebDAVStorageProvider: AdminStorageProvider = { ...emptyS3StorageProvider, name: "", type: "webdav", region: "", allowPrivateNetwork: false };
 
 type SettingsTabKey = "public" | "private";
 type EditorMode = "visual" | "json";
@@ -83,6 +86,12 @@ export default function AdminSettingsPage() {
     const [modelCosts, setModelCosts] = useState<AdminModelCost[]>([]);
     const [knownModels, setKnownModels] = useState<string[]>([]);
     const publicModels = Form.useWatch(["public", "modelChannel", "availableModels"], form) || [];
+    const publicVideoModels = useMemo(() => new Set(filterChannelModelsByCapability(channels, "video", publicModels)), [channels, publicModels]);
+    const orderedPublicModels = useMemo(() => uniqueModels([
+        ...publicVideoModels,
+        ...(["audio", "image", "text"] as const).flatMap((capability) => filterChannelModelsByCapability(channels, capability, publicModels)),
+        ...publicModels,
+    ]), [channels, publicModels, publicVideoModels]);
     const publicWorkflows = Form.useWatch(["public", "modelChannel", "availableWorkflows"], form) || [];
     const storageProviders = Form.useWatch(["private", "storage", "providers"], form) || [];
     const channelProtocol = Form.useWatch("protocol", channelForm);
@@ -121,6 +130,39 @@ export default function AdminSettingsPage() {
         void loadSettings();
     }, [token]);
 
+    useEffect(() => {
+        if (!token) return;
+        const url = new URL(window.location.href);
+        const flow = url.searchParams.get("tokendance_oauth");
+        const storageKey = flow ? `tokendance:oauth-result:${flow}` : "";
+        const raw = storageKey ? sessionStorage.getItem(storageKey) : null;
+        if (!raw) return;
+
+        try {
+            const result = JSON.parse(raw) as {
+                key?: string;
+                draft?: Partial<AdminModelChannel>;
+                editingChannelIndex?: number | null;
+            };
+            if (!result.key || !result.draft) throw new Error("TokenDance 授权结果不完整");
+
+            const channel = normalizeChannel({ ...result.draft, apiKey: result.key });
+            setActiveTab("private");
+            setEditingChannelIndex(typeof result.editingChannelIndex === "number" ? result.editingChannelIndex : null);
+            channelForm.setFieldsValue(channel);
+            setWorkflowChannelDraft(channel);
+            setIsChannelDrawerOpen(true);
+            rememberModels(channel.models);
+            message.success("TokenDance 登录成功，API Key 已填入");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "TokenDance 授权结果读取失败");
+        } finally {
+            sessionStorage.removeItem(storageKey);
+            url.searchParams.delete("tokendance_oauth");
+            window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+        }
+    }, [channelForm, message, token]);
+
     const changeTab = (nextTab: SettingsTabKey) => {
         setActiveTab(nextTab);
     };
@@ -145,6 +187,7 @@ export default function AdminSettingsPage() {
                 public: JSON.stringify(merged.public, null, 2),
                 private: JSON.stringify(merged.private, null, 2),
             });
+            await useConfigStore.getState().loadPublicSettings().catch(() => undefined);
             message.success("已保存");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "保存失败");
@@ -202,9 +245,17 @@ export default function AdminSettingsPage() {
         channelForm.resetFields();
     };
 
+    const loginTokenDance = () => {
+        void startTokenDanceOAuth({
+            target: "admin",
+            draft: channelForm.getFieldsValue(true) as unknown as Record<string, unknown>,
+            editingChannelIndex,
+        }).catch((error) => message.error(error instanceof Error ? error.message : "TokenDance 登录失败"));
+    };
+
     const saveChannel = async () => {
         const values = await channelForm.validateFields();
-        const channel = normalizeChannel(isWorkflowProtocol(values.protocol) ? { ...workflowChannelDraft, ...channelForm.getFieldsValue(true), ...values } : values);
+        const channel = normalizeChannel(isWorkflowProtocol(values.protocol) ? { ...workflowChannelDraft, ...channelForm.getFieldsValue(true), ...values } : { ...values, modelCapabilities: channelForm.getFieldValue("modelCapabilities"), parameterTranslation: channelForm.getFieldValue("parameterTranslation") });
         if (channel.protocol === "runninghub" && (!channel.baseUrl.trim() || (!channel.apiKey.trim() && editingChannelIndex === null))) {
             message.error("请填写 RunningHub Base URL 和积分 API Key");
             return;
@@ -235,8 +286,8 @@ export default function AdminSettingsPage() {
 
     const closeChannelModelSelector = () => setIsModelSelectorOpen(false);
 
-    const confirmChannelModelSelector = (models: string[]) => {
-        channelForm.setFieldValue("models", models);
+    const confirmChannelModelSelector = (models: string[], modelCapabilities: ModelCapabilities, parameterTranslation: string) => {
+        channelForm.setFieldsValue({ models, modelCapabilities, parameterTranslation });
         rememberModels(models);
         closeChannelModelSelector();
     };
@@ -317,6 +368,7 @@ export default function AdminSettingsPage() {
             public: JSON.stringify(merged.public, null, 2),
             private: JSON.stringify(merged.private, null, 2),
         });
+        await useConfigStore.getState().loadPublicSettings().catch(() => undefined);
         message.success("已保存");
     }
 
@@ -472,18 +524,56 @@ export default function AdminSettingsPage() {
                                     <Col span={24}>
                                         <Typography.Title level={5}>模型／工作流算力点</Typography.Title>
                                         <Table
-                                            rowKey="model"
+                                            rowKey="key"
                                             pagination={false}
                                             size="small"
                                             dataSource={[
-                                                ...publicModels.map((model) => ({ model, label: publicModelLabel(model), credits: modelCostCredits(modelCosts, model) })),
+                                                ...orderedPublicModels.map((model) => {
+                                                    const video = publicVideoModels.has(model);
+                                                    return {
+                                                        key: model,
+                                                        model,
+                                                        label: publicModelLabel(model),
+                                                        credits: modelCostCredits(modelCosts, model),
+                                                        kind: "model",
+                                                        children: video ? [
+                                                            ...modelCosts.filter((cost) => cost.model === model && cost.resolution).map((cost, index) => ({ key: `${model}:${cost.resolution}:${index}`, model, label: "", resolution: cost.resolution || "", credits: cost.credits, kind: "resolution" })),
+                                                            { key: `${model}:add`, model, label: "", resolution: "", credits: 0, kind: "add" },
+                                                        ] : undefined,
+                                                    };
+                                                }),
                                                 ...channels.flatMap((channel) => isWorkflowProtocol(channel.protocol) ? (channel.workflows || []).filter((entry) => entry.enabled && publicWorkflows.includes(`workflow:system:${channel.id}:${entry.kind}:${entry.workflowId}`)).map((entry) => {
                                                     const model = `workflow:system:${channel.id}:${entry.kind}:${entry.workflowId}`;
-                                                    return { model, label: `${channel.name} · ${entry.title || entry.workflowId}（工作流）`, credits: modelCostCredits(modelCosts, model) };
+                                                    return { key: model, model, label: `${channel.name} · ${entry.title || entry.workflowId}（工作流）`, credits: modelCostCredits(modelCosts, model), kind: "workflow" };
                                                 }) : []),
                                             ]}
                                             columns={[
-                                                { title: "模型 / 工作流", dataIndex: "model", render: (_, item) => <span title={item.label}>{item.label}</span> },
+                                                {
+                                                    title: "模型 / 工作流",
+                                                    dataIndex: "model",
+                                                    render: (_, item) => item.kind === "resolution" ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <span>└─</span>
+                                                            <Select
+                                                                className="!w-32"
+                                                                placeholder="选择分辨率"
+                                                                value={item.resolution || undefined}
+                                                                options={videoResolutionOptions.map((option) => ({ ...option, disabled: option.value !== item.resolution && modelCosts.some((cost) => cost.model === item.model && cost.resolution === option.value) }))}
+                                                                onChange={(resolution) => setModelCost(form, setModelCosts, item.model, item.credits, resolution, item.resolution)}
+                                                            />
+                                                            <Button danger type="text" icon={<DeleteOutlined />} onClick={() => removeModelCost(form, setModelCosts, item.model, item.resolution)} />
+                                                        </div>
+                                                    ) : item.kind === "add" ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <span>└─</span>
+                                                            <Button type="link" className="!px-0" icon={<PlusOutlined />} disabled={videoResolutionOptions.every((option) => modelCosts.some((cost) => cost.model === item.model && cost.resolution === option.value))} onClick={() => addModelResolutionCost(form, setModelCosts, item.model)}>
+                                                                添加分辨率
+                                                            </Button>
+                                                        </div>
+                                                    ) : (
+                                                        <span title={item.label}>{item.label}</span>
+                                                    ),
+                                                },
                                                 {
                                                     title: (
                                                         <span className="grid leading-tight">
@@ -494,15 +584,22 @@ export default function AdminSettingsPage() {
                                                     dataIndex: "credits",
                                                     width: 220,
                                                     render: (_, item) => (
-                                                        <Space.Compact className="!w-full">
-                                                            <InputNumber min={0} step={0.01} precision={2} className="!w-full" value={item.credits} onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)} />
-                                                            <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
-                                                                点
-                                                            </span>
-                                                        </Space.Compact>
+                                                        item.kind === "add" ? null : (
+                                                            <Space.Compact className="!w-full">
+                                                                <InputNumber min={0} step={0.01} precision={2} className="!w-full" value={item.credits} onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0, item.resolution || "", item.resolution || "")} />
+                                                                <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
+                                                                    点
+                                                                </span>
+                                                            </Space.Compact>
+                                                        )
                                                     ),
                                                 },
                                             ]}
+                                            expandable={{
+                                                showExpandColumn: false,
+                                                expandedRowKeys: publicModels.filter((model) => publicVideoModels.has(model)),
+                                                indentSize: 16,
+                                            }}
                                         />
                                     </Col>
                                 </Row>
@@ -681,21 +778,33 @@ export default function AdminSettingsPage() {
                                                                         <Input placeholder={isWebDAV ? "https://dav.example.com/webdav" : "https://<account>.r2.cloudflarestorage.com"} />
                                                                     </Form.Item>
                                                                 </Col>
+                                                                {isWebDAV && (
+                                                                    <Col xs={24} md={3}>
+                                                                        <Form.Item name={[field.name, "allowPrivateNetwork"]} label="允许内网" valuePropName="checked">
+                                                                            <Switch />
+                                                                        </Form.Item>
+                                                                    </Col>
+                                                                )}
                                                                 {!isWebDAV && (
                                                                     <>
-                                                                        <Col xs={24} md={4}>
+                                                                        <Col xs={24} md={3}>
                                                                             <Form.Item name={[field.name, "region"]} label="Region">
                                                                                 <Input placeholder="auto" />
                                                                             </Form.Item>
                                                                         </Col>
-                                                                        <Col xs={24} md={4}>
+                                                                        <Col xs={24} md={3}>
                                                                             <Form.Item name={[field.name, "bucket"]} label="Bucket">
                                                                                 <Input />
                                                                             </Form.Item>
                                                                         </Col>
+                                                                        <Col xs={24} md={3}>
+                                                                            <Form.Item name={[field.name, "bucketInHost"]} label="路径 / 子域名" valuePropName="checked">
+                                                                                <Switch />
+                                                                            </Form.Item>
+                                                                        </Col>
                                                                     </>
                                                                 )}
-                                                                <Col xs={24} md={4}>
+                                                                <Col xs={24} md={isWebDAV ? 4 : 3}>
                                                                     <Form.Item name={[field.name, "enabled"]} label="启用" valuePropName="checked">
                                                                         <Switch
                                                                             onChange={(checked) => {
@@ -850,7 +959,7 @@ export default function AdminSettingsPage() {
                     extra={
                         <Space>
                             <Button onClick={closeChannelDrawer}>取消</Button>
-                            <Button type="primary" onClick={() => void saveChannel()}>
+                            <Button type="primary" disabled={isLoading} onClick={() => void saveChannel()}>
                                 保存
                             </Button>
                         </Space>
@@ -897,10 +1006,16 @@ export default function AdminSettingsPage() {
                                     label={
                                         <span className="relative inline-flex items-center">
                                             接口地址
-                                            {channelApiKeyUrl ? (
+                                            {channelProtocol === "tokendance" || channelApiKeyUrl ? (
                                                 <span className="absolute left-full top-1/2 ml-2 -translate-y-1/2 whitespace-nowrap">
-                                                    <Button type="primary" size="small" href={channelApiKeyUrl} target="_blank">
-                                                        获取 API Key
+                                                    <Button
+                                                        type="primary"
+                                                        size="small"
+                                                        href={channelProtocol === "tokendance" ? undefined : channelApiKeyUrl}
+                                                        target={channelProtocol === "tokendance" ? undefined : "_blank"}
+                                                        onClick={channelProtocol === "tokendance" ? () => void loginTokenDance() : undefined}
+                                                    >
+                                                        {channelProtocol === "tokendance" ? "登录" : "获取 API Key"}
                                                     </Button>
                                                 </span>
                                             ) : null}
@@ -961,9 +1076,9 @@ export default function AdminSettingsPage() {
                 </Drawer>
                 {isModelSelectorOpen ? (
                     <ChannelModelSelectorModal
-                        channel={channelForm.getFieldsValue()}
+                        channel={channelForm.getFieldsValue(true)}
+                        parameterTranslation={channelForm.getFieldValue("parameterTranslation") || ""}
                         models={channelForm.getFieldValue("models") || []}
-                        sourceModels={knownModels}
                         onCancel={closeChannelModelSelector}
                         onConfirm={confirmChannelModelSelector}
                         onFetchModels={fetchChannelModelList}
@@ -1063,9 +1178,9 @@ function normalizePublicSetting(setting: Partial<AdminSettings["public"]> = {}):
             channels: setting.modelChannel?.channels || [],
             systemPrompts: {
                 ...emptySettings.public.modelChannel.systemPrompts,
-                image: setting.modelChannel?.systemPrompts?.image || setting.modelChannel?.systemPrompt || "",
+                image: setting.modelChannel?.systemPrompts?.image || "",
                 video: setting.modelChannel?.systemPrompts?.video || "",
-                text: setting.modelChannel?.systemPrompts?.text || setting.modelChannel?.systemPrompt || "",
+                text: setting.modelChannel?.systemPrompts?.text || "",
                 workflow: setting.modelChannel?.systemPrompts?.workflow || "",
                 workflowAgent: setting.modelChannel?.systemPrompts?.workflowAgent || "",
             },
@@ -1084,7 +1199,7 @@ function normalizePublicSetting(setting: Partial<AdminSettings["public"]> = {}):
 }
 
 function normalizeModelCosts(items: Partial<AdminSettings["public"]["modelChannel"]["modelCosts"][number]>[]) {
-    return items.filter((item) => item.model).map((item) => ({ model: item.model || "", credits: Math.max(0, Number(item.credits) || 0) }));
+    return items.filter((item) => item.model).map((item) => ({ model: item.model || "", resolution: item.resolution || "", credits: Math.max(0, Number(item.credits) || 0) }));
 }
 
 function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}): AdminSettings["private"] {
@@ -1156,6 +1271,8 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
         baseUrl: item.baseUrl || "",
         apiKey: item.apiKey || "",
         models: item.models || [],
+        modelCapabilities: item.modelCapabilities || {},
+        parameterTranslation: item.parameterTranslation || "",
         uploadApiKey: item.uploadApiKey || "",
         bridgeId: item.bridgeId || "",
         comfyUrl: item.comfyUrl || "",
@@ -1168,14 +1285,27 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
     };
 }
 
-function modelCostCredits(items: AdminSettings["public"]["modelChannel"]["modelCosts"], model: string) {
-    return items.find((item) => item.model === model)?.credits || 0;
+function modelCostCredits(items: AdminSettings["public"]["modelChannel"]["modelCosts"], model: string, resolution = "") {
+    return items.find((item) => item.model === model && (item.resolution || "") === resolution)?.credits || 0;
 }
 
-function setModelCost(form: any, setModelCosts: (items: AdminModelCost[]) => void, model: string, credits: number) {
+function setModelCost(form: any, setModelCosts: (items: AdminModelCost[]) => void, model: string, credits: number, resolution = "", previousResolution = resolution) {
     const current = (form.getFieldValue(["public", "modelChannel", "modelCosts"]) || []) as AdminSettings["public"]["modelChannel"]["modelCosts"];
-    const next = current.filter((item) => item.model !== model);
-    next.push({ model, credits: Math.max(0, credits) });
+    const next = current.filter((item) => item.model !== model || (item.resolution || "") !== previousResolution);
+    next.push({ model, resolution, credits: Math.max(0, credits) });
+    form.setFieldValue(["public", "modelChannel", "modelCosts"], next);
+    setModelCosts(next);
+}
+
+function addModelResolutionCost(form: any, setModelCosts: (items: AdminModelCost[]) => void, model: string) {
+    const current = (form.getFieldValue(["public", "modelChannel", "modelCosts"]) || []) as AdminModelCost[];
+    const resolution = videoResolutionOptions.find((option) => !current.some((item) => item.model === model && item.resolution === option.value))?.value;
+    if (resolution) setModelCost(form, setModelCosts, model, 0, resolution);
+}
+
+function removeModelCost(form: any, setModelCosts: (items: AdminModelCost[]) => void, model: string, resolution: string) {
+    const current = (form.getFieldValue(["public", "modelChannel", "modelCosts"]) || []) as AdminModelCost[];
+    const next = current.filter((item) => item.model !== model || item.resolution !== resolution);
     form.setFieldValue(["public", "modelChannel", "modelCosts"], next);
     setModelCosts(next);
 }
@@ -1261,7 +1391,6 @@ async function collectSettings(form: any, editorMode: Record<SettingsTabKey, Edi
     }
     values.public.modelChannel.availableModels = filterModels(values.public.modelChannel.availableModels, collectChannelModels(values.private.channels));
     values.public.modelChannel.availableWorkflows = filterModels(values.public.modelChannel.availableWorkflows, collectChannelWorkflows(values.private.channels).map((item) => item.value));
-    values.public.modelChannel.systemPrompt = values.public.modelChannel.systemPrompts.image || values.public.modelChannel.systemPrompts.text || "";
     return normalizeSettings(values);
 }
 

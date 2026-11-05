@@ -22,11 +22,11 @@ export default function AdminAICallLogsPage() {
     const [localDirectReportEnabled, setLocalDirectReportEnabled] = useState(false);
     const [savingLocalDirectReport, setSavingLocalDirectReport] = useState(false);
 
-    const loadLogs = async () => {
+    const loadLogs = async (nextKeyword = keyword) => {
         if (!token) return;
         setLoading(true);
         try {
-            const result = await fetchAdminAICallLogs(token, { keyword, page, pageSize });
+            const result = await fetchAdminAICallLogs(token, { keyword: nextKeyword, page, pageSize });
             setLogs(result.items);
             setTotal(result.total);
         } catch (error) {
@@ -95,7 +95,7 @@ export default function AdminAICallLogsPage() {
             { title: "接口", dataIndex: "endpoint", width: 170 },
             { title: "模型", dataIndex: "model", width: 180, ellipsis: true },
             { title: "渠道", dataIndex: "channelName", width: 150, ellipsis: true, render: (_: string, item: AdminAICallLog) => item.channelName || item.channelId || "-" },
-            { title: "状态", dataIndex: "status", width: 90, render: (status: number) => <Tag color={status >= 200 && status < 400 ? "success" : "error"}>{status || "失败"}</Tag> },
+            { title: "状态", dataIndex: "status", width: 90, render: (status: number, item: AdminAICallLog) => <Tag color={!item.failed && status >= 200 && status < 400 ? "success" : "error"}>{status || "失败"}</Tag> },
             { title: "耗时", dataIndex: "durationMs", width: 110, render: (value: number) => formatDuration(value) },
             { title: "扣点", dataIndex: "credits", width: 80 },
             {
@@ -134,7 +134,7 @@ export default function AdminAICallLogsPage() {
                             <Button htmlType="submit" type="primary" icon={<SearchOutlined />}>
                                 查询
                             </Button>
-                            <Button icon={<ReloadOutlined />} onClick={() => { setKeyword(""); setPage(1); void loadLogs(); }}>
+                            <Button icon={<ReloadOutlined />} onClick={() => { setKeyword(""); if (page === 1) void loadLogs(""); else setPage(1); }}>
                                 重置
                             </Button>
                             <div className="flex h-8 items-center gap-2 rounded-md border border-stone-200 px-3 dark:border-stone-800">

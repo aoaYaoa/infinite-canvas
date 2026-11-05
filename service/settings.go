@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -53,6 +54,11 @@ func SaveSettings(settings model.Settings) (model.Settings, error) {
 	keepPrivateAPIKeys(&settings, normalizeSettings(saved))
 	keepPrivateAuthSecrets(&settings, normalizeSettings(saved))
 	keepPrivateStorageSecrets(&settings, normalizeSettings(saved))
+	for _, channel := range settings.Private.Channels {
+		if _, err := ParameterTranslationModels(channel.ParameterTranslation); err != nil {
+			return model.Settings{}, fmt.Errorf("渠道 %s：%w", channel.Name, err)
+		}
+	}
 	if err := validateEnabledStorageProviderTypes(settings.Private.Storage.Providers); err != nil {
 		return model.Settings{}, err
 	}
@@ -77,6 +83,24 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 	resolved, err := resolveAdminChannel(index, channel)
 	if err != nil {
 		return "", err
+	}
+	translation, err := NewParameterTranslation(resolved, modelName, map[string]any{"prompt": "test", "count": 1})
+	if err != nil {
+		return "", err
+	}
+	if translation != nil {
+		kind := resolved.ModelCapabilities[modelName]
+		if kind == "" {
+			kind = "image"
+		}
+		result, err := translation.Send(context.Background(), kind, false, "")
+		if err != nil {
+			return "", err
+		}
+		if len(result.TaskIDs) > 0 {
+			return "自定义请求已提交，接口返回任务 ID", nil
+		}
+		return "自定义请求调用成功", nil
 	}
 	if adapter, ok := matchModelProtocol(modelConfigTestRules, resolved, modelName); ok {
 		return adapter.testModel(resolved, modelName)
@@ -156,13 +180,13 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 		setting.ModelChannel.Channels = []model.PublicModelChannelInfo{}
 	}
 	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.Image) == "" {
-		setting.ModelChannel.SystemPrompts.Image = firstNonEmpty(setting.ModelChannel.SystemPrompt, DefaultSystemPrompts().Image)
+		setting.ModelChannel.SystemPrompts.Image = DefaultSystemPrompts().Image
 	}
 	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.Video) == "" {
 		setting.ModelChannel.SystemPrompts.Video = DefaultSystemPrompts().Video
 	}
 	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.Text) == "" {
-		setting.ModelChannel.SystemPrompts.Text = firstNonEmpty(setting.ModelChannel.SystemPrompt, DefaultSystemPrompts().Text)
+		setting.ModelChannel.SystemPrompts.Text = DefaultSystemPrompts().Text
 	}
 	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.Workflow) == "" {
 		setting.ModelChannel.SystemPrompts.Workflow = DefaultSystemPrompts().Workflow
@@ -172,6 +196,7 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 	}
 	for i := range setting.ModelChannel.ModelCosts {
 		setting.ModelChannel.ModelCosts[i].Model = strings.TrimSpace(setting.ModelChannel.ModelCosts[i].Model)
+		setting.ModelChannel.ModelCosts[i].Resolution = strings.TrimSpace(setting.ModelChannel.ModelCosts[i].Resolution)
 		if setting.ModelChannel.ModelCosts[i].Credits < 0 {
 			setting.ModelChannel.ModelCosts[i].Credits = 0
 		}
@@ -209,18 +234,30 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 	return setting
 }
 
-func ModelCost(modelName string) (float64, error) {
+func ModelCost(modelName string, resolutions ...string) (float64, error) {
 	settings, err := repository.GetSettings()
 	if err != nil {
 		return 0, err
 	}
 	modelName = strings.TrimSpace(modelName)
+	resolution := ""
+	if len(resolutions) > 0 {
+		resolution = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(resolutions[0])), "p")
+	}
+	defaultCredits := 0.0
 	for _, item := range normalizePublicSetting(settings.Public).ModelChannel.ModelCosts {
-		if item.Model == modelName {
+		if item.Model != modelName {
+			continue
+		}
+		if item.Resolution == "" {
+			defaultCredits = item.Credits
+			continue
+		}
+		if strings.TrimSuffix(strings.ToLower(item.Resolution), "p") == resolution {
 			return item.Credits, nil
 		}
 	}
-	return 0, nil
+	return defaultCredits, nil
 }
 
 func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting {
@@ -301,7 +338,7 @@ func findSavedChannel(channel model.ModelChannel, saved []model.ModelChannel, in
 			return item, true
 		}
 	}
-	if index < len(saved) {
+	if index >= 0 && index < len(saved) {
 		return saved[index], true
 	}
 	return model.ModelChannel{}, false
@@ -462,7 +499,7 @@ func isVideoModelName(modelName string) bool {
 	if kind := AutoDLModelKind(modelName); kind != "unsupported" {
 		return kind == "video"
 	}
-	return name == "minimax-h3" || strings.Contains(name, "seedance") || strings.Contains(name, "video") || strings.Contains(name, "sd2.0 720p") || strings.Contains(name, "sd2.5 720p")
+	return name == "minimax-h3" || strings.Contains(name, "seedance") || strings.Contains(name, "video") || (strings.Contains(name, "sd") && !strings.Contains(name, "sdxl"))
 }
 
 func isImageModelName(modelName string) bool {
@@ -1141,16 +1178,27 @@ func publicChannelInfos(channels []model.ModelChannel, availableModels, availabl
 				continue
 			}
 		}
+		modelCapabilities := map[string]string{}
+		for _, name := range models {
+			if capability, ok := channel.ModelCapabilities[name]; ok {
+				modelCapabilities[name] = capability
+			}
+		}
+		translated, _ := ParameterTranslationModels(channel.ParameterTranslation)
+		translated = filterEnabledModels(translated, models)
 		result = append(result, model.PublicModelChannelInfo{
-			ID:       channel.ID,
-			Protocol: channel.Protocol,
-			Name:     channel.Name,
-			BaseURL:  channel.BaseURL,
-			Models:   models,
-			Weight:   channel.Weight,
-			Timeout:  channel.Timeout,
-			Enabled:  channel.Enabled,
-			Remark:   channel.Remark,
+			ParameterTranslationModels: translated,
+			ID:                         channel.ID,
+			Protocol:                   channel.Protocol,
+			Name:                       channel.Name,
+			BaseURL:                    channel.BaseURL,
+			Models:                     models,
+			Weight:                     channel.Weight,
+			Timeout:                    channel.Timeout,
+			Enabled:                    channel.Enabled,
+			Remark:                     channel.Remark,
+
+			ModelCapabilities: modelCapabilities,
 		})
 	}
 	return result

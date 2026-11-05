@@ -34,6 +34,7 @@ func New() *gin.Engine {
 	anonymousFiles := api.Group("/anonymous/files", middleware.AnonymousStorage)
 	anonymousFiles.POST("/session", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	anonymousFiles.POST("", gin.WrapF(handler.UploadFile))
+	anonymousFiles.POST("/temporary", gin.WrapF(handler.UploadTemporaryFile))
 	anonymousFiles.DELETE("/:id", func(c *gin.Context) {
 		handler.DeleteFile(c.Writer, c.Request, c.Param("id"))
 	})
@@ -44,7 +45,7 @@ func New() *gin.Engine {
 	v1.POST("/chat/completions", gin.WrapF(handler.AIChatCompletions))
 	v1.POST("/audio/speech", gin.WrapF(handler.AIAudioSpeech))
 	v1.GET("/tts/voices", gin.WrapF(handler.AITTSVoices))
-	v1.POST("/canvas/tasks/delete", gin.WrapF(handler.DeleteUserCanvasTasks))
+	v1.POST("/canvas/tasks/stop", gin.WrapF(handler.StopCanvasTask))
 	v1.POST("/canvas/image-tasks", gin.WrapF(handler.CreateCanvasImageTask))
 	v1.GET("/canvas/image-tasks", gin.WrapF(handler.UserCanvasImageTasks))
 	v1.POST("/canvas/image-tasks/status", gin.WrapF(handler.BatchCanvasImageTasks))

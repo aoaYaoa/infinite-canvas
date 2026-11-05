@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -25,6 +26,30 @@ import (
 	"github.com/tigerowo/infinite-canvas/model"
 	"github.com/tigerowo/infinite-canvas/service"
 )
+
+func StopCanvasTask(w http.ResponseWriter, r *http.Request) {
+	user, ok := service.UserFromContext(r.Context())
+	if !ok {
+		Fail(w, "未登录或权限不足")
+		return
+	}
+	var input struct {
+		Kind     string `json:"kind"`
+		ID       string `json:"id"`
+		Workflow bool   `json:"workflow"`
+		Source   string `json:"source"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		Fail(w, "请求参数无效")
+		return
+	}
+	stopped, err := service.StopCanvasTask(user.ID, input.Kind, input.ID, input.Workflow, input.Source)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, map[string]bool{"stopped": stopped})
+}
 
 func CreateCanvasImageTask(w http.ResponseWriter, r *http.Request) {
 	user, ok := service.UserFromContext(r.Context())
@@ -154,31 +179,6 @@ func DeleteUserCanvasImageTask(w http.ResponseWriter, r *http.Request, id string
 	OK(w, map[string]any{"deleted": true})
 }
 
-func DeleteUserCanvasTasks(w http.ResponseWriter, r *http.Request) {
-	user, ok := service.UserFromContext(r.Context())
-	if !ok {
-		Fail(w, "未登录或权限不足")
-		return
-	}
-
-	var request struct {
-		SourceID string   `json:"source_id"`
-		NodeIDs  []string `json:"node_ids"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil || strings.TrimSpace(request.SourceID) == "" {
-		Fail(w, "画布任务参数无效")
-		return
-	}
-
-	if err := service.DeleteUserCanvasTasks(user.ID, request.SourceID, request.NodeIDs); err != nil {
-		log.Printf("delete canvas tasks failed: user=%s source=%s err=%v", user.ID, request.SourceID, err)
-		Fail(w, "AI 接口请求失败")
-		return
-	}
-
-	OK(w, map[string]any{"deleted": true})
-}
-
 func CreateCanvasAudioTask(w http.ResponseWriter, r *http.Request) {
 	user, ok := service.UserFromContext(r.Context())
 	if !ok {
@@ -251,38 +251,52 @@ func GetCanvasAudioTask(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []byte, contentType string, channelID string, userChannelID string) {
+	ctx, cleanup, err := service.CanvasTaskContext("image", task.UserID, task.ID)
+	if err != nil {
+		return
+	}
+	defer cleanup()
 	current := taskTime()
 	task.Status = "processing"
 	task.Progress = 10
 	task.StartedAt = current
 	task, _ = service.SaveCanvasImageTask(task)
 
-	payload, status, responseContentType, err := executeCanvasAIRequest(user, task.Endpoint, body, contentType, channelID, userChannelID)
+	payload, status, responseContentType, err := executeCanvasAIRequest(ctx, user, task.Endpoint, body, contentType, channelID, userChannelID, func(progress int) {
+		if progress > task.Progress {
+			task.Progress = min(progress, 99)
+			task, _ = service.SaveCanvasImageTask(task)
+		}
+	})
+	if ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		saveFailedCanvasImageTask(task, err.Error(), err.Error())
 		return
 	}
+	responseDetail := fmt.Sprintf("响应大小：%d bytes；Content-Type：%s", len(payload), responseContentType)
 	if status >= http.StatusBadRequest {
 		message := readUpstreamAIErrorMessage(payload, status)
-		saveFailedCanvasImageTask(task, message, string(payload))
+		saveFailedCanvasImageTask(task, message, responseDetail)
 		return
 	}
 	if message := readWrappedTaskError(payload); message != "" {
-		saveFailedCanvasImageTask(task, message, string(payload))
+		saveFailedCanvasImageTask(task, message, responseDetail)
 		return
 	}
-	collectAll := allAIProtocolImageResults(task.Model)
+	translationInput, _ := service.ReadParameterTranslationInput(body)
+	collectAll := translationInput != nil || allAIProtocolImageResults(task.Model)
 	imageURLs, mimeType, bytes, err := imageURLsFromAIResponse(payload, responseContentType, collectAll, task.Endpoint == "/chat/completions")
 	if err != nil {
-		saveFailedCanvasImageTask(task, err.Error(), string(payload))
+		saveFailedCanvasImageTask(task, err.Error(), responseDetail)
 		return
 	}
 	task.Status = "completed"
 	task.Progress = 100
 	task.CompletedAt = taskTime()
-	task.ResponseBody = string(payload)
 	task.ImageURL = imageURLs[0]
-	if collectAll {
+	if len(imageURLs) > 1 {
 		task.ImageURLs = imageURLs
 	}
 	task.StorageKey = ""
@@ -296,13 +310,26 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 }
 
 func runCanvasAudioTask(task model.CanvasAudioTask, user model.AuthUser, body []byte, contentType string, channelID string, userChannelID string) {
+	ctx, cleanup, err := service.CanvasTaskContext("audio", task.UserID, task.ID)
+	if err != nil {
+		return
+	}
+	defer cleanup()
 	current := taskTime()
 	task.Status = "processing"
 	task.Progress = 10
 	task.StartedAt = current
 	task, _ = service.SaveCanvasAudioTask(task)
 
-	payload, status, responseContentType, err := executeCanvasAIRequest(user, task.Endpoint, body, contentType, channelID, userChannelID)
+	payload, status, responseContentType, err := executeCanvasAIRequest(ctx, user, task.Endpoint, body, contentType, channelID, userChannelID, func(progress int) {
+		if progress > task.Progress {
+			task.Progress = min(progress, 99)
+			task, _ = service.SaveCanvasAudioTask(task)
+		}
+	})
+	if ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		saveFailedCanvasAudioTask(task, err.Error(), err.Error())
 		return
@@ -326,7 +353,7 @@ func runCanvasAudioTask(task model.CanvasAudioTask, user model.AuthUser, body []
 			AudioURL string `json:"audio_url"`
 			MimeType string `json:"mime_type"`
 		}
-		if service.AutoDLModelKind(task.Model) == "audio" && json.Unmarshal(payload, &result) == nil && result.Provider == service.ModelChannelProtocolAutoDL && result.AudioURL != "" {
+		if json.Unmarshal(payload, &result) == nil && result.AudioURL != "" && (result.Provider == "parameter-translation" || (service.AutoDLModelKind(task.Model) == "audio" && result.Provider == service.ModelChannelProtocolAutoDL)) {
 			task.Status, task.Progress, task.CompletedAt = "completed", 100, taskTime()
 			task.AudioURL, task.MimeType, task.ResponseBody = result.AudioURL, result.MimeType, string(payload)
 			task.Error, task.ErrorDetail = "", ""
@@ -352,9 +379,13 @@ func runCanvasAudioTask(task model.CanvasAudioTask, user model.AuthUser, body []
 	_, _ = service.SaveCanvasAudioTask(task)
 }
 
-func executeCanvasAIRequest(user model.AuthUser, endpoint string, body []byte, contentType string, channelID string, userChannelID string) ([]byte, int, string, error) {
+func executeCanvasAIRequest(ctx context.Context, user model.AuthUser, endpoint string, body []byte, contentType string, channelID string, userChannelID string, onProgress ...func(int)) ([]byte, int, string, error) {
 	request := httptest.NewRequest(http.MethodPost, "http://canvas.local/api/v1"+endpoint, bytes.NewReader(body))
-	request = request.WithContext(service.WithUser(context.Background(), user))
+	request = request.WithContext(service.WithUser(ctx, user))
+	request.Header.Set("X-Canvas-Node-Request", "true")
+	if len(onProgress) > 0 {
+		request = request.WithContext(context.WithValue(request.Context(), parameterTranslationProgressKey{}, onProgress[0]))
+	}
 	if contentType != "" {
 		request.Header.Set("Content-Type", contentType)
 	}
@@ -367,8 +398,7 @@ func executeCanvasAIRequest(user model.AuthUser, endpoint string, body []byte, c
 	proxyAIRequest(recorder, request, endpoint)
 	response := recorder.Result()
 	defer response.Body.Close()
-	payload, _ := io.ReadAll(io.LimitReader(response.Body, 32*1024*1024))
-	return payload, response.StatusCode, response.Header.Get("Content-Type"), nil
+	return recorder.Body.Bytes(), response.StatusCode, response.Header.Get("Content-Type"), nil
 }
 
 func saveFailedCanvasImageTask(task model.CanvasImageTask, message string, detail string) {
@@ -690,6 +720,9 @@ func collectImageCandidates(value any, depth int, includeChatImages bool) []stri
 		}
 		return result
 	case map[string]any:
+		if thought, _ := typed["thought"].(bool); thought && typed["inlineData"] != nil {
+			return nil
+		}
 		keys := []string{"url", "b64_json", "partial_image_b64", "image_url", "image", "image_data", "base64", "inlineData", "parts", "content", "candidates", "result", "response", "data", "output"}
 		if includeChatImages {
 			keys = append(keys, "choices", "message", "images")

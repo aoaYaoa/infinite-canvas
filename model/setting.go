@@ -30,6 +30,9 @@ type ModelChannel struct {
 	ComfyURL     string          `json:"comfyUrl,omitempty"`
 	WorkflowDir  string          `json:"workflowDir,omitempty"`
 	Workflows    []WorkflowEntry `json:"workflows,omitempty"`
+
+	ModelCapabilities    map[string]string `json:"modelCapabilities,omitempty"`
+	ParameterTranslation string            `json:"parameterTranslation,omitempty"`
 }
 
 type WorkflowFieldMapping struct {
@@ -84,8 +87,9 @@ type WorkflowSummary struct {
 
 // ModelCost 模型算力点配置。
 type ModelCost struct {
-	Model   string  `json:"model"`
-	Credits float64 `json:"credits"`
+	Model      string  `json:"model"`
+	Resolution string  `json:"resolution,omitempty"`
+	Credits    float64 `json:"credits"`
 }
 
 // PublicModelChannelSetting 公开模型渠道配置。
@@ -113,16 +117,19 @@ type SystemPromptSetting struct {
 }
 
 type PublicModelChannelInfo struct {
-	ID        string            `json:"id"`
-	Protocol  string            `json:"protocol"`
-	Name      string            `json:"name"`
-	BaseURL   string            `json:"baseUrl"`
-	Models    []string          `json:"models"`
-	Weight    int               `json:"weight"`
-	Timeout   int               `json:"timeout"`
-	Enabled   bool              `json:"enabled"`
-	Remark    string            `json:"remark"`
-	Workflows []WorkflowSummary `json:"workflows,omitempty"`
+	ParameterTranslationModels []string          `json:"parameterTranslationModels,omitempty"`
+	ID                         string            `json:"id"`
+	Protocol                   string            `json:"protocol"`
+	Name                       string            `json:"name"`
+	BaseURL                    string            `json:"baseUrl"`
+	Models                     []string          `json:"models"`
+	Weight                     int               `json:"weight"`
+	Timeout                    int               `json:"timeout"`
+	Enabled                    bool              `json:"enabled"`
+	Remark                     string            `json:"remark"`
+	Workflows                  []WorkflowSummary `json:"workflows,omitempty"`
+
+	ModelCapabilities map[string]string `json:"modelCapabilities,omitempty"`
 }
 
 // PublicSetting 公开配置。
@@ -188,8 +195,10 @@ type StorageProvider struct {
 	Name              string `json:"name"`
 	Type              string `json:"type"`
 	Endpoint          string `json:"endpoint"`
+	AllowPrivateNetwork bool `json:"allowPrivateNetwork,omitempty"`
 	Region            string `json:"region"`
 	Bucket            string `json:"bucket"`
+	BucketInHost      bool   `json:"bucketInHost,omitempty"`
 	AccessKeyID       string `json:"accessKeyId"`
 	SecretAccessKey   string `json:"secretAccessKey"`
 	PublicBaseURL     string `json:"publicBaseUrl"`
@@ -228,8 +237,8 @@ type PrivateLinuxDoAuthSetting struct {
 type Setting struct {
 	Key       SettingKey      `json:"key" gorm:"primaryKey"`
 	Value     json.RawMessage `json:"value" gorm:"serializer:json"`
-	CreatedAt string          `json:"createdAt"`
-	UpdatedAt string          `json:"updatedAt"`
+	CreatedAt string          `json:"createdAt" gorm:"size:64"`
+	UpdatedAt string          `json:"updatedAt" gorm:"size:64"`
 }
 
 // Settings 系统公开和私有配置。

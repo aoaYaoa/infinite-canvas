@@ -20,7 +20,7 @@ export enum CanvasNodeType {
     Group = "group",
 }
 
-export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
+export type CanvasNodeStatus = "idle" | "success" | "loading" | "stopping" | "stopped" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
 
@@ -71,6 +71,9 @@ export type CanvasNodeMetadata = {
     mimoTtsFormat?: string;
     mimoVoiceDesignPrompt?: string;
     geminiTtsVoice?: string;
+    miniMaxTtsVoice?: string;
+    miniMaxTtsFormat?: string;
+    miniMaxTtsSpeed?: string;
     mimoVoiceCloneAudioNodeId?: string;
     referenceAudioNodeId?: string;
     references?: string[];
@@ -89,12 +92,15 @@ export type CanvasNodeMetadata = {
     durationMs?: number;
     startedAt?: number;
     progress?: number;
+    clientTaskId?: string;
+    taskBackend?: "account" | "workflow";
     imageTaskId?: string;
     imageTaskResultId?: string;
     audioTaskId?: string;
     audioTaskResultId?: string;
     videoTaskId?: string;
     videoTaskVideoId?: string;
+    videoTaskTranslation?: import("@/services/api/video").VideoResponse["translationSnapshot"];
     firstFrameNodeId?: string;
     lastFrameNodeId?: string;
     multiShot?: string;

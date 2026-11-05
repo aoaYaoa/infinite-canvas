@@ -3,7 +3,7 @@ import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
 export const SEEDANCE_REFERENCE_LIMITS = {
-    images: 9,
+    images: 10,
     videos: 3,
     audios: 3,
     imageMaxBytes: 30 * 1024 * 1024,
@@ -90,7 +90,7 @@ export function isSeedanceVideoConfig(config: Pick<AiConfig, "model" | "videoMod
 
 export function isSeedanceVideoModel(model: string) {
     const value = model.toLowerCase();
-    return value.includes("seedance") || value.includes("doubao-seedance");
+    return value.includes("seedance") || value.includes("doubao-seedance") || value.includes("sd2");
 }
 
 export function isSeedanceFastOrMiniModel(model: string) {

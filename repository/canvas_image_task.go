@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/tigerowo/infinite-canvas/model"
-	"gorm.io/gorm"
 )
 
 func SaveCanvasImageTask(task model.CanvasImageTask) (model.CanvasImageTask, error) {
@@ -12,7 +11,7 @@ func SaveCanvasImageTask(task model.CanvasImageTask) (model.CanvasImageTask, err
 	if err != nil {
 		return task, err
 	}
-	return task, db.Save(&task).Error
+	return task, db.Create(&task).Error
 }
 
 func UpdateCanvasImageTask(task model.CanvasImageTask) (model.CanvasImageTask, error) {
@@ -22,8 +21,12 @@ func UpdateCanvasImageTask(task model.CanvasImageTask) (model.CanvasImageTask, e
 	}
 
 	return task, db.Model(&model.CanvasImageTask{}).
-		Where("user_id = ? AND id = ?", task.UserID, task.ID).
-		Select("*").
+		Where("user_id = ? AND id = ? AND status <> ?", task.UserID, task.ID, "cancelled").
+		Select(
+			"Status", "Progress", "ResponseBody", "Error", "ErrorDetail",
+			"ImageURL", "ImageURLs", "StorageKey", "Width", "Height",
+			"MimeType", "Bytes", "UpdatedAt", "StartedAt", "CompletedAt",
+		).
 		Updates(&task).Error
 }
 
@@ -88,11 +91,12 @@ func HasActiveCanvasImageTasks() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var count int64
-	err = db.Model(&model.CanvasImageTask{}).
+	var task model.CanvasImageTask
+	query := db.Model(&model.CanvasImageTask{}).Select("id").
 		Where("status IN ?", []string{"queued", "processing", "running", "in_progress"}).
-		Count(&count).Error
-	return count > 0, err
+		Limit(1).
+		Find(&task)
+	return query.RowsAffected > 0, query.Error
 }
 
 func DeleteFinishedCanvasImageTasksBefore(before string) error {
@@ -101,37 +105,8 @@ func DeleteFinishedCanvasImageTasksBefore(before string) error {
 		return err
 	}
 	return db.Where("completed_at <> ? AND completed_at < ?", "", before).
-		Where("status IN ?", []string{"completed", "failed"}).
+		Where("status IN ?", []string{"completed", "failed", "cancelled"}).
 		Delete(&model.CanvasImageTask{}).Error
-}
-
-func DeleteUserCanvasTasks(userID string, sourceID string, nodeIDs []string) error {
-	db, err := DB()
-	if err != nil {
-		return err
-	}
-
-	nodeIDs = uniqueTrimmedValues(nodeIDs...)
-
-	return db.Transaction(func(tx *gorm.DB) error {
-		deleteTasks := func(task any) error {
-			query := tx.Where(
-				"user_id = ? AND source = ? AND source_id = ?",
-				userID,
-				"canvas",
-				sourceID,
-			)
-			if len(nodeIDs) > 0 {
-				query = query.Where("node_id IN ?", nodeIDs)
-			}
-			return query.Delete(task).Error
-		}
-
-		if err := deleteTasks(&model.CanvasImageTask{}); err != nil {
-			return err
-		}
-		return deleteTasks(&model.CanvasAudioTask{})
-	})
 }
 
 func uniqueTrimmedValues(values ...string) []string {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -113,13 +114,24 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 		return
 	}
 	upstreamPath := resolveAIProxyPath(channel, modelName, path)
-	request, err := http.NewRequest(http.MethodGet, resolveAIProxyURL(channel, modelName, upstreamPath), nil)
+	method := http.MethodGet
+	var request *http.Request
+	if service.IsMiniMaxChannel(channel) && service.IsMiniMaxTTSModelName(modelName) && strings.HasPrefix(path, "/tts/voices") {
+		method = http.MethodPost
+		upstreamPath = "/v1/get_voice"
+		request, err = http.NewRequest(method, resolveAIProxyURL(channel, modelName, upstreamPath), strings.NewReader(`{"voice_type":"system"}`))
+	} else {
+		request, err = http.NewRequest(method, resolveAIProxyURL(channel, modelName, upstreamPath), nil)
+	}
 	if err != nil {
 		Fail(w, "AI 接口请求失败")
 		return
 	}
 	service.SetModelChannelAuthHeader(request, channel)
-	copyAIResponse(w, request, channel, aiLogContext{StartedAt: startedAt, Endpoint: path, Method: http.MethodGet, Model: modelName, Channel: channel, UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), RequestBody: summarizeQueryParams(r.URL.Query())}, nil)
+	if method == http.MethodPost {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	copyAIResponse(w, request, channel, aiLogContext{StartedAt: startedAt, Endpoint: path, Method: method, Model: modelName, Channel: channel, UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), RequestBody: summarizeQueryParams(r.URL.Query())}, nil)
 }
 
 func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
@@ -151,6 +163,9 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		}
 		credits *= float64(readAIRequestCount(body, contentType, false))
 	}
+	if serveParameterTranslation(w, r, body, path, channel, user, credits, startedAt) {
+		return
+	}
 	upstreamPath := resolveAIProxyPath(channel, modelName, path)
 	prepared, _, err := prepareAIProtocolRequest(aiProtocolRequest{
 		mode: aiProtocolProxyRequest, body: body, contentType: contentType, modelName: modelName,
@@ -159,14 +174,21 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	if err != nil {
 		log.Printf("AI proxy normalize %s request failed: model=%s err=%v", prepared.failureLabel, modelName, err)
 		message := "AI 接口请求失败"
-		if prepared.failureLabel == "MiMo TTS" || prepared.failureLabel == "AutoDL" {
+		if prepared.failureLabel == "MiMo TTS" || prepared.failureLabel == "MiniMax TTS" || prepared.failureLabel == "AutoDL" {
 			message = err.Error()
 		}
 		Fail(w, message)
 		return
 	}
+	ctx := context.Background()
+	if r.Header.Get("X-Canvas-Node-Request") == "true" {
+		ctx = r.Context()
+	}
+	if ctx.Err() != nil {
+		return
+	}
 	body, contentType, upstreamPath = prepared.body, prepared.contentType, prepared.path
-	request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, upstreamPath), bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, service.BuildModelChannelURL(channel, upstreamPath), bytes.NewReader(body))
 	if err != nil {
 		log.Printf("AI proxy build request failed: url=%s err=%v", service.BuildModelChannelURL(channel, upstreamPath), err)
 		Fail(w, "AI 接口请求失败")
@@ -193,7 +215,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		Credits:         credits,
 		RequestBody:     summarizeAIRequest(body, contentType),
 	}, func() {
-		if credits > 0 {
+		if credits > 0 && ctx.Err() == nil {
 			if err := service.RefundUserCredits(user.ID, modelName, credits, upstreamPath); err != nil {
 				log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%g err=%v", user.ID, modelName, credits, err)
 			}
@@ -218,6 +240,7 @@ type aiLogContext struct {
 	UserDisplayName string
 	Credits         float64
 	RequestBody     string
+	OutcomeKnown    bool
 }
 
 func copyAIResponse(w http.ResponseWriter, request *http.Request, channel model.ModelChannel, logContext aiLogContext, onFailure func()) {
@@ -240,7 +263,11 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, channel model.
 			onFailure()
 		}
 		saveAIProxyLog(logContext, response.StatusCode, string(payload), strings.TrimSpace(string(payload)))
-		Fail(w, readUpstreamAIErrorMessage(payload, response.StatusCode))
+		message := readUpstreamAIErrorMessage(payload, response.StatusCode)
+		if service.IsTokenDanceChannel(channel) {
+			message = firstNonEmpty(service.TokenDanceRecoveryMessage(response.Header.Get("TokenDance-Recovery-Action")), message)
+		}
+		Fail(w, message)
 		return
 	}
 
@@ -309,6 +336,7 @@ func saveAIProxyLog(context aiLogContext, status int, responseBody string, error
 		RequestBody:     context.RequestBody,
 		ResponseBody:    responseBody,
 		Error:           errorMessage,
+		OutcomeKnown:    context.OutcomeKnown,
 	})
 }
 
@@ -512,6 +540,36 @@ func readAIRequestCount(body []byte, contentType string, video bool) int {
 		return 1
 	}
 	return count
+}
+
+func readAIRequestResolution(body []byte, contentType string) string {
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		_, params, err := mime.ParseMediaType(contentType)
+		if err != nil {
+			return ""
+		}
+		form, err := multipart.NewReader(bytes.NewReader(body), params["boundary"]).ReadForm(32 << 20)
+		if err != nil {
+			return ""
+		}
+		defer form.RemoveAll()
+		for _, field := range []string{"resolution_name", "resolution"} {
+			if values := form.Value[field]; len(values) > 0 {
+				return values[0]
+			}
+		}
+		return ""
+	}
+	var payload map[string]any
+	if json.Unmarshal(body, &payload) != nil {
+		return ""
+	}
+	return firstNonEmpty(
+		readStringPath(payload, "resolution_name"),
+		readStringPath(payload, "resolution"),
+		readStringPath(payload, "parameters.resolution"),
+		readStringPath(payload, "_parameterTranslation.variables.resolution"),
+	)
 }
 
 func resolveAIProxyURL(channel model.ModelChannel, modelName string, path string) string {
