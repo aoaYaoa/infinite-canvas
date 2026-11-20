@@ -28,6 +28,7 @@ type RequestCanvasAgentTurnInput = {
     tools: CanvasAgentToolDefinition[];
     toolMode: CanvasAgentToolMode;
     onContextUsage?: (usage: CanvasAgentContextUsage) => void;
+    onReasoning?: (delta: string) => void;
     signal?: AbortSignal;
 };
 
@@ -73,6 +74,7 @@ type ResponsesOutputItem = Record<string, unknown> & {
     name?: string;
     arguments?: unknown;
     content?: Array<{ type?: string; text?: string }>;
+    summary?: Array<{ type?: string; text?: string }>;
 };
 
 type ResponsesResult = {
@@ -98,10 +100,15 @@ class CanvasAgentRequestError extends Error {
     }
 }
 
-type CanvasAgentAiConfig = AiConfig & { textReasoningEnabled?: boolean; textStreaming?: boolean; skipTokenCalibration?: boolean };
+type CanvasAgentAiConfig = AiConfig & { textReasoningEnabled?: boolean; textStreaming?: boolean; skipTokenCalibration?: boolean; canvasVideoAnalysisId?: string };
 
 function applyCanvasAgentReasoning(body: Record<string, unknown>, config: CanvasAgentAiConfig, mode: "chat" | "responses" | "gemini") {
-    if (!config.textReasoningEnabled) return;
+    if (!config.textReasoningEnabled) {
+        if (mode === "chat" && config.model.toLowerCase().includes("deepseek")) {
+            body.thinking = { type: "disabled" };
+        }
+        return;
+    }
     if (mode === "responses") body.reasoning = { effort: "high" };
     else if (mode === "gemini") body.generationConfig = { ...((body.generationConfig as Record<string, unknown> | undefined) || {}), thinkingConfig: config.model.toLowerCase().includes("2.5") ? { thinkingBudget: -1 } : { thinkingLevel: "high" } };
     else if (channelProtocolForConfig(config) === "mimo") body.thinking = { type: "enabled" };
@@ -142,7 +149,7 @@ export async function requestCanvasAgentTurn(input: RequestCanvasAgentTurnInput)
             try {
                 input.onContextUsage?.({ tokens: estimateCanvasAgentInputTokens({ systemPrompt, messages, tools }, canvasAgentTokenCalibrationKey(requestConfig)) });
             } catch { /* 用量展示不影响请求 */ }
-            const message = await requestCompletion(requestConfig, systemPrompt, messages, tools, jsonSchema, input.signal);
+            const message = await requestCompletion(requestConfig, systemPrompt, messages, tools, jsonSchema, input.signal, input.onReasoning);
             try {
                 input.onContextUsage?.({ tokens: estimateCanvasAgentInputTokens({ systemPrompt, messages: [...messages, { role: "assistant", ...message }], tools }, canvasAgentTokenCalibrationKey(requestConfig)) });
             } catch { /* 用量展示不影响返回 */ }
@@ -166,6 +173,30 @@ export async function requestCanvasAgentTurn(input: RequestCanvasAgentTurnInput)
         }
     }
     throw requestError;
+}
+
+export async function requestCanvasVideoVision(
+    config: CanvasAgentAiConfig,
+    content: Extract<CanvasAgentProtocolMessage, { role: "user" | "system" }>["content"],
+    analysisId: string,
+    signal: AbortSignal,
+) {
+    const result = await requestCompletion(
+        { ...config, canvasVideoAnalysisId: analysisId, skipTokenCalibration: true },
+        "按时间戳和图片回答，仅依据实际画面。输出 JSON，text 为带时间的观察。仅在 canReview 为 true 且为回答问题确有必要时，在 reviews 数组列出需要补查的区间。每项含 startMs 和 endMs，为输入窗口内的整数毫秒，每段最多一秒。",
+        [{ role: "user", content }],
+        [],
+        undefined,
+        signal,
+    ).catch((error: unknown) => {
+        if (isImageCompatibilityError(error)) {
+            throw new Error("当前云端文本模型不接收图片，请在现有模型配置中选用支持图片输入的模型");
+        }
+        throw error;
+    });
+    const contentText = result.content.trim();
+    if (!contentText) throw new Error("视觉模型未返回视频分析结果");
+    return contentText;
 }
 
 export function canvasAgentSystemPrompt(config: AiConfig, prompt: string, jsonTools: CanvasAgentToolDefinition[] = [], nativeTools = false) {
@@ -222,9 +253,9 @@ export async function requestCanvasAgentCheckpoint(input: {
     }
 }
 
-async function requestCompletion(config: CanvasAgentAiConfig, systemPrompt: string, messages: CanvasAgentProtocolMessage[], tools: CanvasAgentToolDefinition[], jsonSchema?: Record<string, unknown>, signal?: AbortSignal) {
-    if (config.apiMode === "responses") return requestResponsesCompletion(config, systemPrompt, messages, tools, jsonSchema, signal);
-    if (isGeminiConfig(config)) return requestGeminiCompletion(config, systemPrompt, messages, tools, jsonSchema, signal);
+async function requestCompletion(config: CanvasAgentAiConfig, systemPrompt: string, messages: CanvasAgentProtocolMessage[], tools: CanvasAgentToolDefinition[], jsonSchema?: Record<string, unknown>, signal?: AbortSignal, onReasoning?: RequestCanvasAgentTurnInput["onReasoning"]) {
+    if (config.apiMode === "responses") return requestResponsesCompletion(config, systemPrompt, messages, tools, jsonSchema, signal, onReasoning);
+    if (isGeminiConfig(config)) return requestGeminiCompletion(config, systemPrompt, messages, tools, jsonSchema, signal, onReasoning);
     const body: Record<string, unknown> = {
         model: config.model,
         messages: [{ role: "system", content: systemPrompt }, ...messages.map(toRequestMessage)],
@@ -238,15 +269,20 @@ async function requestCompletion(config: CanvasAgentAiConfig, systemPrompt: stri
     if (jsonSchema) body.response_format = { type: "json_schema", json_schema: { name: "canvas_agent_actions", schema: jsonSchema } };
     applyCanvasAgentReasoning(body, config, "chat");
 
-    const response = await fetch(aiApiUrl(config, "/chat/completions"), {
+    const url = aiApiUrl(config, "/chat/completions");
+    const response = await fetch(url, {
         method: "POST",
-        headers: aiHeaders(config, "application/json"),
+        headers: {
+            ...aiHeaders(config, "application/json"),
+            ...(config.canvasVideoAnalysisId && url.startsWith("/api/v1/") ? { "X-Canvas-Node-Request": "true" } : {}),
+        },
         body: JSON.stringify(body),
         signal,
     });
     let payload: ChatCompletionPayload;
     let rawText = "";
-    if (config.textStreaming && response.ok && isEventStreamResponse(response)) {
+    const streaming = config.textStreaming && response.ok && isEventStreamResponse(response);
+    if (streaming) {
         let content = "";
         let reasoningContent = "";
         let finishReason = "";
@@ -264,7 +300,10 @@ async function requestCompletion(config: CanvasAgentAiConfig, systemPrompt: stri
             }> | undefined)?.[0];
             if (!choice) return;
             if (typeof choice.delta?.content === "string") content += choice.delta.content;
-            if (typeof choice.delta?.reasoning_content === "string") reasoningContent += choice.delta.reasoning_content;
+            if (typeof choice.delta?.reasoning_content === "string") {
+                reasoningContent += choice.delta.reasoning_content;
+                onReasoning?.(choice.delta.reasoning_content);
+            }
             if (typeof choice.finish_reason === "string") finishReason = choice.finish_reason;
             for (const fragment of choice.delta?.tool_calls || []) {
                 const index = typeof fragment.index === "number" ? fragment.index : toolCalls.length;
@@ -300,13 +339,14 @@ async function requestCompletion(config: CanvasAgentAiConfig, systemPrompt: stri
     if (choice?.finish_reason && /^(?:length|content_filter|max_tokens)$/i.test(choice.finish_reason)) {
         throw new CanvasAgentRequestError("文本模型输出未完成：" + choice.finish_reason, response.status);
     }
+    if (message.reasoning_content) onReasoning?.(streaming ? "\n\n" : message.reasoning_content + "\n\n");
     const normalizedModel = config.model.trim().toLowerCase();
     const preservesReasoningContent = normalizedModel.startsWith("glm-") || mimoTextModels.some((model) => model === normalizedModel);
     const reasoningContent = preservesReasoningContent && typeof message.reasoning_content === "string" ? message.reasoning_content : undefined;
 
     const inputTokens = payload.usage?.prompt_tokens || payload.data?.usage?.prompt_tokens;
     if (!config.skipTokenCalibration) calibrateCanvasAgentTokenEstimate(canvasAgentTokenCalibrationKey(config), { systemPrompt, messages, tools }, inputTokens);
-    refreshRemoteUser(config);
+    if (!config.canvasVideoAnalysisId) refreshRemoteUser(config);
     let toolError: string | undefined;
     const toolCalls = (message.tool_calls || []).flatMap((toolCall, index) => {
         const name = toolCall.function?.name?.trim();
@@ -330,7 +370,7 @@ async function requestCompletion(config: CanvasAgentAiConfig, systemPrompt: stri
     };
 }
 
-async function requestResponsesCompletion(config: CanvasAgentAiConfig, systemPrompt: string, messages: CanvasAgentProtocolMessage[], tools: CanvasAgentToolDefinition[], jsonSchema?: Record<string, unknown>, signal?: AbortSignal) {
+async function requestResponsesCompletion(config: CanvasAgentAiConfig, systemPrompt: string, messages: CanvasAgentProtocolMessage[], tools: CanvasAgentToolDefinition[], jsonSchema?: Record<string, unknown>, signal?: AbortSignal, onReasoning?: RequestCanvasAgentTurnInput["onReasoning"]) {
     const body: Record<string, unknown> = {
         model: config.model,
         instructions: systemPrompt,
@@ -346,17 +386,31 @@ async function requestResponsesCompletion(config: CanvasAgentAiConfig, systemPro
     if (jsonSchema) body.text = { format: { type: "json_schema", name: "canvas_agent_actions", schema: jsonSchema } };
     applyCanvasAgentReasoning(body, config, "responses");
 
-    const response = await fetch(aiApiUrl(config, "/responses"), {
+    const url = aiApiUrl(config, "/responses");
+    const response = await fetch(url, {
         method: "POST",
-        headers: aiHeaders(config, "application/json"),
+        headers: {
+            ...aiHeaders(config, "application/json"),
+            ...(config.canvasVideoAnalysisId && url.startsWith("/api/v1/") ? { "X-Canvas-Node-Request": "true" } : {}),
+        },
         body: JSON.stringify(body),
         signal,
     });
     let payload: ResponsesPayload;
     let rawText = "";
+    const streamedReasoning = new Set<string>();
+    let reasoningPart = "";
     if (config.textStreaming && response.ok && isEventStreamResponse(response)) {
         let terminal: ResponsesPayload | undefined;
         await readCanvasAgentStream(response, (event) => {
+            if (onReasoning && typeof event.delta === "string" && event.delta &&
+                (event.type === "response.reasoning_summary_text.delta" || event.type === "response.reasoning_text.delta")) {
+                const source = event.type === "response.reasoning_summary_text.delta" ? "summary" : "content";
+                const part = `${event.output_index}:${source}:${event.summary_index ?? event.content_index ?? 0}`;
+                onReasoning((reasoningPart && reasoningPart !== part ? "\n\n" : "") + event.delta);
+                streamedReasoning.add(part);
+                reasoningPart = part;
+            }
             if (
                 ["response.completed", "response.incomplete", "response.failed"].includes(String(event.type))
                 && event.response && typeof event.response === "object"
@@ -387,6 +441,16 @@ async function requestResponsesCompletion(config: CanvasAgentAiConfig, systemPro
         throw new CanvasAgentRequestError("文本模型输出未完成：" + (responseStatus || incompleteReason) + (responseStatus && incompleteReason ? "（" + incompleteReason + "）" : ""), response.status);
     }
     const output = result.output || [];
+    if (onReasoning) {
+        const reasoning = output.flatMap((item, index) => item.type === "reasoning" ? [
+            ...(item.summary || []).map((part, partIndex) =>
+                streamedReasoning.has(`${index}:summary:${partIndex}`) ? undefined : part.text),
+            ...(item.content || []).map((part, partIndex) =>
+                streamedReasoning.has(`${index}:content:${partIndex}`) ? undefined : part.text),
+        ] : []).filter(Boolean).join("\n\n");
+        if (reasoningPart) onReasoning("\n\n");
+        if (reasoning) onReasoning(reasoning + "\n\n");
+    }
     const toolCalls: CanvasAgentToolCall[] = [];
     let toolError: string | undefined;
     const responseItems = output.flatMap((item, index) => {
@@ -404,7 +468,7 @@ async function requestResponsesCompletion(config: CanvasAgentAiConfig, systemPro
     });
     const inputTokens = result.usage?.input_tokens;
     if (!config.skipTokenCalibration) calibrateCanvasAgentTokenEstimate(canvasAgentTokenCalibrationKey(config), { systemPrompt, messages, tools }, inputTokens);
-    refreshRemoteUser(config);
+    if (!config.canvasVideoAnalysisId) refreshRemoteUser(config);
     return {
         content: typeof result.output_text === "string" ? result.output_text : output.flatMap((item) => item.type === "message" ? item.content || [] : []).map((item) => item.type === "output_text" && typeof item.text === "string" ? item.text : "").join(""),
         responseItems,
@@ -413,7 +477,7 @@ async function requestResponsesCompletion(config: CanvasAgentAiConfig, systemPro
     };
 }
 
-async function requestGeminiCompletion(config: CanvasAgentAiConfig, systemPrompt: string, messages: CanvasAgentProtocolMessage[], tools: CanvasAgentToolDefinition[], jsonSchema?: Record<string, unknown>, signal?: AbortSignal) {
+async function requestGeminiCompletion(config: CanvasAgentAiConfig, systemPrompt: string, messages: CanvasAgentProtocolMessage[], tools: CanvasAgentToolDefinition[], jsonSchema?: Record<string, unknown>, signal?: AbortSignal, onReasoning?: RequestCanvasAgentTurnInput["onReasoning"]) {
     const contents = await Promise.all(messages.filter((message) => message.role !== "system").map(async (message) => {
         if (message.role === "assistant") {
             return {
@@ -448,13 +512,20 @@ async function requestGeminiCompletion(config: CanvasAgentAiConfig, systemPrompt
     const { model: _model, stream: _stream, ...nativeBody } = body;
     const response = await fetch(proxy ? aiApiUrl(config, "/chat/completions") : geminiActionUrl(channel?.baseUrl || config.baseUrl, config.model, config.textStreaming ? "streamGenerateContent" : "generateContent"), {
         method: "POST",
-        headers: proxy ? aiHeaders(config, "application/json") : geminiDirectHeaders(config),
+        headers: proxy ? {
+            ...aiHeaders(config, "application/json"),
+            ...(config.canvasVideoAnalysisId ? {
+                "X-Canvas-Node-Request": "true",
+                "X-Canvas-Video-Analysis-ID": config.canvasVideoAnalysisId,
+            } : {}),
+        } : geminiDirectHeaders(config),
         body: JSON.stringify(proxy ? body : nativeBody),
         signal,
     });
     let payload: Record<string, unknown>;
     let rawText = "";
-    if (config.textStreaming && response.ok && isEventStreamResponse(response)) {
+    const streaming = config.textStreaming && response.ok && isEventStreamResponse(response);
+    if (streaming) {
         const parts: Array<Record<string, unknown>> = [];
         let finishReason: string | undefined;
         let usageMetadata: unknown;
@@ -464,7 +535,12 @@ async function requestGeminiCompletion(config: CanvasAgentAiConfig, systemPrompt
             const candidates = Array.isArray(event.candidates) ? event.candidates as Array<Record<string, unknown>> : [];
             for (const candidate of candidates) {
                 const content = candidate.content as { parts?: unknown } | undefined;
-                if (Array.isArray(content?.parts)) parts.push(...(content.parts as Array<Record<string, unknown>>));
+                if (Array.isArray(content?.parts)) {
+                    for (const part of content.parts as Array<Record<string, unknown>>) {
+                        parts.push(part);
+                        if (part.thought === true && typeof part.text === "string") onReasoning?.(part.text);
+                    }
+                }
                 if (typeof candidate.finishReason === "string") finishReason = candidate.finishReason;
             }
             if (event.usageMetadata) usageMetadata = event.usageMetadata;
@@ -485,10 +561,14 @@ async function requestGeminiCompletion(config: CanvasAgentAiConfig, systemPrompt
         return Array.isArray(content.parts) ? content.parts as Array<Record<string, unknown>> : [];
     });
     if (!parts.length) throw new CanvasAgentRequestError(geminiErrorMessage(payload, "文本模型没有返回内容"), response.status);
+    if (onReasoning) {
+        const reasoning = parts.map((part) => part.thought === true && typeof part.text === "string" ? part.text : "").join("");
+        if (reasoning) onReasoning(streaming ? "\n\n" : reasoning + "\n\n");
+    }
     const usageMetadata = payload.usageMetadata && typeof payload.usageMetadata === "object" ? payload.usageMetadata as Record<string, unknown> : {};
     const inputTokens = typeof usageMetadata.promptTokenCount === "number" ? usageMetadata.promptTokenCount : undefined;
     if (!config.skipTokenCalibration) calibrateCanvasAgentTokenEstimate(canvasAgentTokenCalibrationKey(config), { systemPrompt, messages, tools }, inputTokens);
-    refreshRemoteUser(config);
+    if (!config.canvasVideoAnalysisId) refreshRemoteUser(config);
     let toolError: string | undefined;
     const toolCalls = parts.flatMap((part, index) => {
         const call = part.functionCall && typeof part.functionCall === "object" ? part.functionCall as Record<string, unknown> : null;
@@ -501,7 +581,7 @@ async function requestGeminiCompletion(config: CanvasAgentAiConfig, systemPrompt
         return [{ id: `gemini-tool-${index}`, name, ...parseToolArguments(call.args) }];
     });
     return {
-        content: parts.map((part) => typeof part.text === "string" ? part.text : "").join(""),
+        content: parts.map((part) => typeof part.text === "string" && (!onReasoning || part.thought !== true) ? part.text : "").join(""),
         ...(toolError ? { toolError } : {}),
         toolCalls,
     };
